@@ -1,0 +1,70 @@
+.Rproj.user
+*.Rproj
+# ignore temp_function/ folder, which contains temp testing methods
+temp_function/*
+
+#ignore modules/ folder in rmd folder for now
+# report_rmd/*/rmd_modules/*
+
+#ignore resource/ folder in rmd folder due to mistaken knitting
+report_rmd/*/resource/*
+report_rmd/*/resource
+report_rmd/*/results/
+report_rmd/*/raw_data/
+report_rmd/*/raw_data
+report_rmd/*/rmd_modules/results/
+*.results/
+# ignore results/ folder, which will be testing directory
+*/results/
+*/results/*
+*/raw_data/
+# ignore work/ folder, which will be testing directory
+#work/*
+# History files
+*.Rhistory
+*.Rapp.history
+# Session Data files
+*.RData
+# User-specific files
+.Ruserdata
+# Example code in package build process
+*-Ex.R
+# Output files from R CMD build
+/*.tar.gz
+# Output files from R CMD check
+/*.Rcheck/
+# RStudio files
+.Rproj.user/*
+# produced vignettes
+vignettes/*.html
+vignettes/*.pdf
+# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
+.httr-oauth
+# knitr and R markdown default cache directories
+*_cache/
+/cache/
+# Temporary files created by R markdown
+*.utf8.md
+*.knit.md
+# R Environment Variables
+.Renviron
+# pkgdown site
+docs/
+# translation temp files
+po/*~
+# R markdown temp figures
+man/
+# html file
+*.html
+*.pdf
+# .log
+*.log
+# .josn
+*.josn
+# bash & nohup out
+*.sh
+*.out 
+*.png
+# remove RDs data
+*.RDs
+#
