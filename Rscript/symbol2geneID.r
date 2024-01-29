@@ -1,4 +1,5 @@
 library(dplyr)
+library(openxlsx)
 library(clusterProfiler)
 library(org.Hs.eg.db)
 `%!in%` <- Negate(`%in%`)
@@ -14,12 +15,18 @@ setdiff(rownames(exp_group_object@exp),gene$SYMBOL)
 #### use Nanostring annotation file ####
 annotation_geneid <- read.csv("~/Reference_Data/WTA_symbol2geneID.csv",sep = ",") %>% 
   dplyr::select(c('TargetName','GeneID'))
-file.list <- list.files("./","*.csv")
+file.list <- list.files("./","*.xlsx")
 ### annotation DEG file
 purrr::walk(file.list,function(.x){
-  DEG <- read.csv(.x)
-  DEG_merge <- merge(annotation_geneid,DEG,by = 1)
-  write.csv(DEG_merge,file = paste0("./add_geneID/geneID_",.x),row.names = F)
+  # DEG <- read.csv(.x)
+  DEG <- read.xlsx(.x)
+  # DEG_merge <- full_join(DEG, annotation_geneid, by = join_by(Gene == TargetName )) %>% 
+  #   dplyr::select(1, GeneID, everything())
+  DEG_merge <- merge(DEG, annotation_geneid, by = 1, all.x = T, sort = F) %>% 
+    dplyr::select(1, GeneID, everything())
+    
+  # write.csv(DEG_merge,file = paste0("./add_geneID/geneID_",.x),row.names = F)
+  write.xlsx(x = DEG_merge, file = paste0("./add_geneID3/geneID_", .x), overwrite = T)
 })
 ### annotation raw/nor expression file
 raw_exp <- merge(annotation_geneid,exp_group_object@raw_exp,by.x = "TargetName",by.y = 0)

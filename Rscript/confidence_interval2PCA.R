@@ -206,7 +206,7 @@ setMethod("tSNE_plot", "EPARS_data", function(object, group = c("SegmentLabel"),
   return(object)
 })
 
-#### del the Other sample ####
+#### del the "Other" sample ####
     setMethod("PCA_plot", "EPARS_data", function(object, group = c("SegmentLabel"),
                                                  CachePath = CachePath, template = template,
                                                  color_palette = brewer.pal(name="Accent", n = 8),
