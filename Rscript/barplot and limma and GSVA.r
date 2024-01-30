@@ -5,7 +5,7 @@ library(tidyverse)
 library(tidyr)
 library(openxlsx)
 library(ggplot2)
-library(ggtheme)
+# library(ggtheme)
 library(ggprism)
 patway_expr <- exp_group_object@signature_list %>% 
   do.call(rbind, .) %>% rownames_to_column("pathway") %>% 
@@ -35,7 +35,7 @@ deg_groups <- "Group1_1(EGFR_neg:EGFR_pos); HER2(TLS_N:TLS_P); KRAS_1(TLS_N:TLS_
 
 
 deg_object_list <- setup_deg_object_from_string(deg_groups)
-g <- names(deg_object_list)
+g <- names(deg_object_list)[1]
 
 Plot.function2 <- function(g, anno, patway_expr){
   
@@ -92,8 +92,8 @@ if(all(colnames(cal.data) == cell.anno$SampleID)){
       axis.text.y = element_blank(),
       axis.ticks.y = element_blank()
       ) + 
-    geom_text(data = dplyr::filter(dat_plot, t < -2), 
-              aes(x = id,y = 0.1,label = id),
+    geom_text(data = dplyr::filter(dat_plot, t < -2), size = 11,# fix the font size
+              aes(x = id,y = 0.1, label = id),
                      hjust = 0,color = 'black') + # 小于-1的为黑色标签
     geom_text(data = dplyr::filter(dat_plot, t < 0 & t > -2),
               aes(x = id,y = 0.1,label = id),

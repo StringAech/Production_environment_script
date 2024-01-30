@@ -26,7 +26,7 @@ purrr::walk(file.list,function(.x){
     dplyr::select(1, GeneID, everything())
     
   # write.csv(DEG_merge,file = paste0("./add_geneID/geneID_",.x),row.names = F)
-  write.xlsx(x = DEG_merge, file = paste0("./add_geneID3/geneID_", .x), overwrite = T)
+  write.xlsx(x = DEG_merge, file = paste0("./add_geneID/geneID_", .x), overwrite = T)
 })
 ### annotation raw/nor expression file
 raw_exp <- merge(annotation_geneid,exp_group_object@raw_exp,by.x = "TargetName",by.y = 0)
