@@ -83,28 +83,29 @@ if(all(colnames(cal.data) == cell.anno$SampleID)){
     geom_col()+
     coord_flip() +
     scale_fill_manual(values = c('Up'= '#36638a','NoSignifi'='#cccccc','Down'='#7bcd7b')) +
-    geom_hline(yintercept = c(-2,2),color = 'white',size = 0.5,lty='dashed') +
+    geom_hline(yintercept = c(-2, 2), color = 'white', linewidth = 0.5, lty='dashed') +
     xlab('') + 
-    ylab('t value of GSVA score, tumour versus non-malignant') + #注意坐标轴旋转了
-    guides(fill=F) + # 不显示图例
+    ylab(paste0('t value of GSVA score, ', names(lev)[1], " versus ", names(lev)[2])) +
+    # ylab('t value of GSVA score, tumour versus non-malignant') + #注意坐标轴旋转了
+    guides(fill = "none") + # 不显示图例
     theme_prism(border = T) +
     theme(
       axis.text.y = element_blank(),
       axis.ticks.y = element_blank()
       ) + 
-    geom_text(data = dplyr::filter(dat_plot, t < -2), size = 11,# fix the font size
+    geom_text(data = dplyr::filter(dat_plot, t < -2), size = 3,# fix the font size
               aes(x = id,y = 0.1, label = id),
                      hjust = 0,color = 'black') + # 小于-1的为黑色标签
-    geom_text(data = dplyr::filter(dat_plot, t < 0 & t > -2),
+    geom_text(data = dplyr::filter(dat_plot, t < 0 & t > -2), size = 3,
               aes(x = id,y = 0.1,label = id),
               hjust = 0,color = 'grey') + # 灰色标签
-    geom_text(data = dplyr::filter(dat_plot, t > 0 & t < 2),
+    geom_text(data = dplyr::filter(dat_plot, t > 0 & t < 2), size = 3,
               aes(x = id,y = -0.1,label = id),
               hjust = 1,color = 'grey') + # 灰色标签
-    geom_text(data = dplyr::filter(dat_plot, t >2),
+    geom_text(data = dplyr::filter(dat_plot, t >2), size = 3,
               aes(x = id,y = -0.1,label = id),
               hjust = 1,color = 'black')
-  ggsave(plot = p, filename = paste0(dir, "/", g, "_barplot.pdf"), width = 8, height = 8)
+  ggsave(plot = p, filename = paste0(dir, "/", g, "_barplot.pdf"), width = 8, height = 12)
   
 }else{
   stop("The expression sample and comment sample names do not correspond")
