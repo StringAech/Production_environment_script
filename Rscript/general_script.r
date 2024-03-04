@@ -1,3 +1,4 @@
+`%!in%` <- Negate(`%in%`)
 #### trans2Symbol #### @
 trans2symbol <- function(.data, RNASeq_mRNA_org = "hsa", gene = TRUE, transcrit = F, ...) {
   # read in gene id
@@ -34,3 +35,20 @@ trans2symbol <- function(.data, RNASeq_mRNA_org = "hsa", gene = TRUE, transcrit 
   }
   return(merge.file)
 }
+
+#### is.sum_equal ####
+# 判断行列和是否为某一个数
+# data 需要判读的矩阵
+# margin 1 行 2 列
+# select_col 选择的列, 要求列是数字
+# equal 和
+# is.exclude 逻辑值 是否要排除掉符合条件的列
+## TRUE 则返回不包含 符合条件的列名 反正则只返回 符合条件的列名
+
+is.sum_equal <- function(data, margin = 2, select_col = "ABC", equal = 0, is.exclude = TRUE){
+  res <- apply(data[, select_col], MARGIN = margin, \(.x) isTRUE(all.equal(sum(.x), equal))) 
+  if (is.exclude) {return(select_col[!res])}else{return(select_col[res])}
+}
+## eg
+# plot.data <- tidy.anno(immcell_exp, anno, number = i, col = "comment2") %>% 
+#   dplyr::select(1:2, is.sum_equal(data = ., margin = 2, select_col = colnames(.)[3:26], equal = 0, is.exclude = T))

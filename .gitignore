@@ -62,7 +62,7 @@ man/
 # .josn
 *.josn
 # bash & nohup out
-*.sh
+# *.sh
 *.out 
 *.png
 # remove RDs data

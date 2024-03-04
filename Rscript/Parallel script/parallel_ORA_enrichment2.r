@@ -152,23 +152,23 @@ parallel_ORA_enrichment <- function(exp_group_object, CachePath, PlotsPath, core
 #                              CachePath = "./test/plot/aaaa/",
 #                              PlotsPath = "./test/plot/aaaa/")
 #### Extraction of image data
-p1_list <- list()
-p2_list <- list()
-
-for (g in names(exp_group_object@deg)) {
-    p <- ggarrange(exp_group_object@deg[[g]]@deg_enrich$GO_UP[[2]], exp_group_object@deg[[g]]@deg_enrich$KEGG_UP[[2]], 
-                   exp_group_object@deg[[g]]@deg_enrich$GO_DOWN[[2]], exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN[[2]], 
-                   labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
-                              "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
-                   ncol = 2, nrow = 2, heights = 13, widths = 12)
-    p1_list[[g]] <- p
-}
-
-for (g in names(exp_group_object@deg)) {
-    p2 <- ggarrange(exp_group_object@deg[[g]]$GO_UP[[4]], exp_group_object@deg[[g]]$KEGG_UP[[5]], 
-                    exp_group_object@deg[[g]]$GO_DOWN[[4]], exp_group_object@deg[[g]]$KEGG_DOWN[[5]], 
-                    labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
-                               "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
-                    ncol = 2, nrow = 2, heights = 13, widths = 12)
-    p2_list[[g]] <- p2
-}
+# p1_list <- list()
+# p2_list <- list()
+# 
+# for (g in names(exp_group_object@deg)) {
+#     p <- ggarrange(exp_group_object@deg[[g]]@deg_enrich$GO_UP[[2]], exp_group_object@deg[[g]]@deg_enrich$KEGG_UP[[2]], 
+#                    exp_group_object@deg[[g]]@deg_enrich$GO_DOWN[[2]], exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN[[2]], 
+#                    labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
+#                               "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
+#                    ncol = 2, nrow = 2, heights = 13, widths = 12)
+#     p1_list[[g]] <- p
+# }
+# 
+# for (g in names(exp_group_object@deg)) {
+#     p2 <- ggarrange(exp_group_object@deg[[g]]$GO_UP[[4]], exp_group_object@deg[[g]]$KEGG_UP[[5]], 
+#                     exp_group_object@deg[[g]]$GO_DOWN[[4]], exp_group_object@deg[[g]]$KEGG_DOWN[[5]], 
+#                     labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
+#                                "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
+#                     ncol = 2, nrow = 2, heights = 13, widths = 12)
+#     p2_list[[g]] <- p2
+# }
