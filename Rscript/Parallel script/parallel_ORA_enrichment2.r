@@ -89,6 +89,13 @@ parallel_ORA_enrichment <- function(exp_group_object, CachePath, PlotsPath, core
         return(return_list)
     }
     enrich.function <- function(g) {
+        rescale.AsIs <- function(x, ...) {
+            dropAsis <- function(x) {
+                cls <- class(x)
+                structure(x, class = setdiff(cls, "AsIs"))
+            }
+            scales:::rescale(dropAsis(x), ...)
+        }
         tmp_deg <- exp_group_object@deg[[g]]@result_df
         filtered_up <- rownames(tmp_deg %>%
                                     dplyr::filter(tmp_deg$change == "UP"))
