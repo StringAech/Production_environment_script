@@ -46,16 +46,16 @@ sample.num <- lapply(test, \(.x){
   res <- list(sample.num = length(.x), level.num = length(levels(.x)))
   return(res)
 })
-# # check level number 
-# if (!sapply(sample.num, \(.x) .x$level.num == 2) %>% all()){
-#   warning("Levels number error!")
-#          sapply(sample.num, \(.x) .x$level.num != 2 ) %>% sample.num[.] %>% names() %>% 
-#            gsub(pattern = "=", replacement = "$", x = .) %>% print()
-# }
-# # check sum sample number 
+# check level number
+if (!sapply(sample.num, \(.x) .x$level.num == 2) %>% all()){
+  warning("Levels number error!")
+         sapply(sample.num, \(.x) .x$level.num != 2 ) %>% sample.num[.] %>% names() %>%
+           gsub(pattern = "=", replacement = "$", x = .) %>% print()
+}
+# check sum sample number
 # if (!sapply(sample.num, \(.x) .x$sample.num > 2) %>% all()) {
 #   warning("Sample number error!")
-#   sapply(sample.num, \(.x) .x$sample.num < 3) %>% sample.num[.] %>% 
+#   sapply(sample.num, \(.x) .x$sample.num < 3) %>% sample.num[.] %>%
 #     names() %>% gsub(pattern = "=", replacement = "$", x = .) %>% print()
 # }
 # check sub sample number
@@ -72,7 +72,21 @@ if (!sapply(test, \(.x) all(table(.x) > 2)) %>% all()){
 #   as.list()
 # a <- do.call(paste, c(a, sep = "; "))
 
-a <- sapply(test, \(.x) all(table(.x) > 2)) %>%
+# a <- sapply(test, \(.x) all(table(.x) > 2)) %>%
+#   sample.num[.] %>%
+#   names() %>%
+#   gsub(pattern = "=", replacement = "$", x = .) %>%
+#   as.list()
+# a <- do.call(paste, c(a, sep = "; "))
+
+interaction(sapply(sample.num, \(.x) .x$level.num == 2), sapply(test, \(.x) all(table(.x) > 2)))
+
+filter_Group <- function(...){
+  return(Reduce('&', list(...)))
+  # return(filter1 & filter2)
+}
+
+a <- filter_Group(sapply(sample.num, \(.x) .x$level.num == 2), sapply(test, \(.x) all(table(.x) > 2))) %>%
   sample.num[.] %>%
   names() %>%
   gsub(pattern = "=", replacement = "$", x = .) %>%
