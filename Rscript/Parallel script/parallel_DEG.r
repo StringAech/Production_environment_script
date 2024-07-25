@@ -1,8 +1,85 @@
 # for example :
 # exp_group_object <- parallel_DEG(exp_group_object, CachePath = "./test/", core.num = 25)
 
-
+obtain_edgeR_DE <- function (matrix, groupinfo, lfc_cutoff = 1, fdr_cutoff = 0.05, 
+          outdir = "data", prefix = "DEGs", cutoff_sig = "FDR") 
+{
+  library(edgeR)
+  dge <- DGEList(counts = matrix, group = groupinfo)
+  keep <- filterByExpr(matrix, group = groupinfo, min.count = 3)
+  dge <- dge[keep, , keep.lib.sizes = FALSE]
+  dge$samples$lib.size <- colSums(dge$counts)
+  dge <- calcNormFactors(dge)
+  design <- model.matrix(~0 + groupinfo)
+  rownames(design) <- colnames(dge)
+  colnames(design) <- levels(groupinfo)
+  dge <- estimateGLMCommonDisp(dge, design)
+  dge <- estimateGLMTrendedDisp(dge, design)
+  dge <- estimateGLMTagwiseDisp(dge, design)
+  fit <- glmFit(dge, design)
+  fit2 <- glmLRT(fit, contrast = c(-1, 1))
+  DEG = topTags(fit2, n = nrow(exp))
+  DEG = as.data.frame(DEG)
+  logFC_cutoff <- lfc_cutoff
+  switch(cutoff_sig, 
+         "P_value" = {
+           k1 = (DEG$PValue < fdr_cutoff) & (DEG$logFC < -logFC_cutoff)
+           k2 = (DEG$PValue < fdr_cutoff) & (DEG$logFC > logFC_cutoff)
+         },
+         "FDR" = {
+           k1 = (DEG$FDR < fdr_cutoff) & (DEG$logFC < -logFC_cutoff)
+           k2 = (DEG$FDR < fdr_cutoff) & (DEG$logFC > logFC_cutoff)
+         })
+  DEG$change = ifelse(k1, "DOWN", ifelse(k2, "UP", "NOT"))
+  DEG <- DEG %>% arrange(factor(change, levels = c("UP", "DOWN", 
+                                                   "NOT")), PValue)
+  lcpm <- cpm(matrix, log = TRUE)
+  write.table(lcpm, paste0(outdir, "/", prefix, "_TMM_normalized_edgeR.csv"), 
+              sep = ",", row.names = T, col.names = NA)
+  write.table(DEG, paste0(outdir, "/", prefix, "_edgeR.csv"), 
+              sep = ",", row.names = T, col.names = NA)
+  return(DEG)
+}
 parallel_DEG <- function(exp_group_object, CachePath, core.num = 20){
+  obtain_edgeR_DE <- function (matrix, groupinfo, lfc_cutoff = 1, fdr_cutoff = 0.05, 
+                               outdir = "data", prefix = "DEGs", cutoff_sig = "FDR") 
+  {
+    library(edgeR)
+    dge <- DGEList(counts = matrix, group = groupinfo)
+    keep <- filterByExpr(matrix, group = groupinfo, min.count = 3)
+    dge <- dge[keep, , keep.lib.sizes = FALSE]
+    dge$samples$lib.size <- colSums(dge$counts)
+    dge <- calcNormFactors(dge)
+    design <- model.matrix(~0 + groupinfo)
+    rownames(design) <- colnames(dge)
+    colnames(design) <- levels(groupinfo)
+    dge <- estimateGLMCommonDisp(dge, design)
+    dge <- estimateGLMTrendedDisp(dge, design)
+    dge <- estimateGLMTagwiseDisp(dge, design)
+    fit <- glmFit(dge, design)
+    fit2 <- glmLRT(fit, contrast = c(-1, 1))
+    DEG = topTags(fit2, n = nrow(exp))
+    DEG = as.data.frame(DEG)
+    logFC_cutoff <- lfc_cutoff
+    switch(cutoff_sig, 
+           "P_value" = {
+             k1 = (DEG$PValue < fdr_cutoff) & (DEG$logFC < -logFC_cutoff)
+             k2 = (DEG$PValue < fdr_cutoff) & (DEG$logFC > logFC_cutoff)
+           },
+           "FDR" = {
+             k1 = (DEG$FDR < fdr_cutoff) & (DEG$logFC < -logFC_cutoff)
+             k2 = (DEG$FDR < fdr_cutoff) & (DEG$logFC > logFC_cutoff)
+           })
+    DEG$change = ifelse(k1, "DOWN", ifelse(k2, "UP", "NOT"))
+    DEG <- DEG %>% arrange(factor(change, levels = c("UP", "DOWN", 
+                                                     "NOT")), PValue)
+    lcpm <- cpm(matrix, log = TRUE)
+    write.table(lcpm, paste0(outdir, "/", prefix, "_TMM_normalized_edgeR.csv"), 
+                sep = ",", row.names = T, col.names = NA)
+    write.table(DEG, paste0(outdir, "/", prefix, "_edgeR.csv"), 
+                sep = ",", row.names = T, col.names = NA)
+    return(DEG)
+  }
   suppressMessages(library(forcats))
   suppressPackageStartupMessages(library(EPARS))
   # Based on the input string information for DEG groups, setup basic structure
@@ -50,7 +127,8 @@ parallel_DEG <- function(exp_group_object, CachePath, core.num = 20){
                                  lfc_cutoff = exp_group_object@config$deg$lfc_cutoff,
                                  fdr_cutoff = exp_group_object@config$deg$fdr_cutoff,
                                  outdir = CachePath,
-                                 prefix = paste0("DE_list_" ,deg_object_list[[g_complex]]@label_string))
+                                 prefix = paste0("DE_list_" ,deg_object_list[[g_complex]]@label_string),
+                                 cutoff_sig = "FDR")
       
       tmp_deg=data.frame(tmp_deg,check.names = F)
       write.table(tmp_deg, paste0(CachePath, "/", paste0("DE_list_" ,deg_object_list[[g_complex]]@label_string), "_edgeR.csv"),
@@ -105,5 +183,6 @@ parallel_DEG <- function(exp_group_object, CachePath, core.num = 20){
   saveRDS(exp_group_object, paste0(CachePath, "/exp_group_object.RDS")) 
   return(exp_group_object)
 }
+
 
 # exp_group_object <- parallel_DEG(exp_group_object, CachePath = "./test/", core.num = 25)

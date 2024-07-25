@@ -37,7 +37,6 @@ group_factors <- as.factor(data[, "Group"]) # 第一列作为因子
 numeric_data <- data %>% dplyr::select(-Group) # 其余列作为数值型数据
 for(i in seq_along(numeric_data)) {
   current_column <- numeric_data[, i]
-  
   # 创建模型
   model <- aov(current_column ~ group_factors)
   anova_results <- anova(model)

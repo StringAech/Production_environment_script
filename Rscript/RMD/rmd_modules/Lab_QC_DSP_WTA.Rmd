@@ -1,0 +1,592 @@
+---
+# title: "DSP CTA 标准分析报告"
+# author: "Hu Tianmu (Timo)"
+# date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    number_sections: true
+    theme: paper
+    smooth_scroll: false
+    keep_md: false
+    highlight: tango
+    self_contained: true
+    dev: "png"
+    df_print: paged
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+params:
+  json_path: "./raw_data/list_param.json"
+  extdata_path: "./resource/extdata/"
+  resource_path: "./resource/"
+bibliography: resource/ref.bib
+csl: resource/ieee.csl
+link-citations: true
+---
+
+```{r Lab-QC-setup-wd, include = F,cache=FALSE}
+knitr::opts_knit$set(root.dir = dirname(getwd()))
+```
+
+# 实验信息
+
+## DSP 技术原理
+
+GeoMx<sup>®</sup> Digital Spatial Profiler (DSP)，即
+GeoMx数字空间多组学分析系统(仪器)，是由NanoString公司开发的新型平台，它的具体技术原理[@van2019user]可以被概括为：<br>
+
+对应待检测靶标的抗体或RNA 探针可通过 UV（紫外光）
+可切割接头（UV-Linker）共价连接到寡核苷酸标签（Indexing
+Oligo）上。先将荧光直标的形态学标志物（Morphology
+Markers）、带有寡核苷酸标签的抗体或RNA探针与组织样本一起孵育，通过全片扫描确定感兴趣的区域（ROI），再通过UV照射切割ROI中的寡核酸标签并收集这些标签：或利用nCounter直接进行数字量化；或利用建库并进行NGS测序数字量化；最后将数据返回到DSP进行分析，实现这些离散ROI内详细表达谱的信号解读。
+
+过往利用DSP技术平台发表的科研成果和文献可参阅：[@PELKA20214734][@cancers13174456][@cabrita2020tertiary]。
+
+<center>
+
+![](`r paste0(Resource_info_Path,  "Lab_Graph/DSP_Protein_Lab_Workflow.jpg") `){width="90%"}
+
+</center>
+
+## 实验操作流程概述
+
+a)  样本预处理后进行RNA靶点暴露
+
+b)  样本固定后加入待检测的Whole Transcriptome Atlas 探针集进行原位杂交
+
+c)  样本封闭和形态学标志物染色
+
+d)  样本全片扫描和ROIs圈选
+
+e)  AOIs确认并进行紫外光照射，释放寡核苷酸标签
+
+f)  收集寡核苷酸标签至Collection Plate中
+
+g)  DSP标准流程构建PCR体系，完成文库构建
+
+h)  文库纯化，文库转化及MGISEQ-2000测序，或者Illumina平台测序
+
+下图中对寡核苷酸标签收集和PCR构建过程做了进一步解释，其中DSP
+Plate即为Collection Plate，Primer
+Plate包含了每个孔特定标记的引物序列，Master
+Mix包含了PCR所需的酶、dNTPs等组分。PCR产物即构建得到的文库，通过磁珠纯化后上机测序。
+![](`r paste0(Resource_info_Path,  "Lab_Graph/collection_plate.png") `)
+
+## 仪器和试剂信息
+
+<details><summary>本项目使用到的仪器和试剂相关信息请点击下拉列表</summary>
+
+```{r, instrument_reagent, results = 'asis'}
+tb_instrument <- readxl::read_xlsx(paste0(list_param[["extdata_path"]],  "annotate/WTA_wuliao.xlsx"))
+
+#tb_instrument <- readxl::read_xlsx(paste0("~/CTA/wuliao.xlsx"))
+cat("<br>")
+print(kable(tb_instrument, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'"))
+
+cat("<br>")
+
+tb_reagent <- read.xlsx(paste0(list_param[["extdata_path"]],  "annotate/WTA_yiq.xlsx"))
+#tb_reagent <- read.xlsx(paste0("~/CTA/yiq.xlsx"))
+print(kable(tb_reagent, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'") %>% row_spec(0, bold = T, color = "white", background = "#4E84CC") %>% kable_material("striped") %>% scroll_box(height = "450px"))
+cat("<br>")
+  
+```
+
+</details>
+
+## 形态学标志物(Morphology Markers)信息
+
+本项目在DSP技术平台上使用到的形态学标志物请参见下方表格。
+
+```{r, morphology_marker, results = 'asis'}
+tb_morphology_marker <- readxl::read_excel(list_param$param_path, 
+    sheet = "morph_marker")
+  cat("<br>")
+  print(kable(tb_morphology_marker, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'"))
+  
+```
+
+## AOI/ROI信息
+
+```{r sample-info, results='asis'}
+# add section to show num of AOI/ROI, and num of slides.
+num_AOI <- nrow(exp_group_object@anno)
+cat(sprintf("本项目共包含 **%s** 个AOI/ROI，", paste0(num_AOI)))
+if("SlideName" %in% names(exp_group_object@anno)){
+	unique_slide <- unique(exp_group_object@anno$SlideName)
+	num_slide <- length(unique_slide)
+	cat(sprintf("来自 **%s** 张玻片**%s**，", paste0(num_slide),
+				paste0(unique_slide, collapse="、")))
+}
+cat("所有AOI/ROI注释(Annotation)信息请参见下方表格。")
+
+cat("<br>")
+print(kbl(exp_group_object@anno, format = 'html', row.names = F, 
+			table.attr = "class=\'epars-tbl\'") %>% row_spec(0, bold = T, color = "white", background = "#4E84CC") %>% kable_material("striped") %>% scroll_box(height = "450px"))
+
+cat("<br>")  
+
+```
+
+```{r scan-figure-background,results='hide'}
+show_scan_figure=F
+
+if (is.null(list_param$directory_data_path) == FALSE){
+  
+ if(length(dir(list_param$directory_data_path,pattern = "html$",recursive = T,full.names = T)
+)){
+	scan_figures_input_path <- list_param$directory_data_path
+	scan_figures_result_path <- sub('[/][^/]+$', paste0('/0.', 
+								ensure_trailing_slash(basename(scan_figures_input_path))), 
+								gsub('[/]$', '', PlotsPath))
+	R.utils::copyDirectory(scan_figures_input_path, scan_figures_result_path)
+} else {scan_figures_result_path <- NULL}
+
+if (is.null(scan_figures_result_path) == TRUE){
+	show_scan_figure <- FALSE
+} else {
+	slide_name <- list.files(scan_figures_result_path)
+	slide_fig_list <- list()
+	for (per_slide_name in slide_name){
+		# per_path <- paste0(ensure_trailing_slash(scan_figures_result_path), 
+		# 				   per_slide_name, "/", per_slide_name, ".png")
+		per_path <- paste0(ensure_trailing_slash(scan_figures_result_path), 
+		 				   per_slide_name, "/", per_slide_name, ".html")
+		if (file.exists(per_path) != T){
+			cat(paste0("In the given path '", per_path, "', scan figure was not found.\n"))
+		} else {
+			slide_fig_list[[per_slide_name]] <- per_path
+		}
+}
+}
+if(!is.null(list_param$directory_data_path)){
+  if(sum(grepl("html",dir(list_param$directory_data_path,recursive = T)))){
+    show_scan_figure=TRUE
+  }
+}
+}
+```
+
+`r if(show_scan_figure == TRUE){"## AOI/ROI精扫图"} `
+
+```{r scan-figure, eval = show_scan_figure, results = "asis"}
+# add section to show num of AOI/ROI, and num of slides.
+num_AOI <- nrow(exp_group_object@anno)
+cat(sprintf("本项目共包含 **%s** 个AOI/ROI，", paste0(num_AOI)))
+if("SlideName" %in% names(exp_group_object@anno)){
+	unique_slide <- unique(exp_group_object@anno$SlideName)
+	num_slide <- length(unique_slide)
+	cat(sprintf("来自 **%s** 张玻片**%s**，", paste0(num_slide),
+				paste0(unique_slide, collapse="、")))
+}
+cat('下方的链接展示了每张玻片的精扫图和每个ROI/AOI对应的扫描图片。')
+cat('<br>**请注意，扫描图片与分析结果一起打包传输给您，若此处链接失效请直接前往结果文件夹中的： <span class="highlight">')
+cat(dirname(slide_fig_list[[1]])%>%str_remove(paste0(normalizePath('.'),'/')))
+cat('</span> 查看。**<br>')
+#dirname(slide_fig_list[[1]])%>%str_remove(normalizePath('../'))
+if(show_scan_figure == TRUE){
+	for (per_name in names(slide_fig_list)){
+		cat(sprintf('<span class="highlight">[%s 的扫描图](%s)</span>', paste0(per_name),
+					paste0(slide_fig_list[[per_name]]%>%str_remove(paste0(normalizePath('.'),'/')))))
+		cat(space)
+	}
+}
+
+# embedded plotly plot inside html report
+# plotly_list <- htmltools::tagList()
+# if(show_scan_figure == TRUE){
+# 	for (per_name in names(slide_fig_list)){
+# 		plotly_list[[per_name]] <- plot_plotly_plot(fig_path = slide_fig_list[[per_name]])
+# 		# saveWidget(plot_plotly_plot(fig_path = slide_fig_list[[per_name]]), 
+# 		# 		   gsub("png$", "html", slide_fig_list[[per_name]]),
+# 		# 		   selfcontained = T)
+# 	}
+# }
+# plotly_list
+
+```
+<br>
+
+# 数据质控
+
+本部分内容为WTA分析中的数据质量控制(QC)以及数据标准化或称作归一化(Normalization)的方法。其中包含：
+<br>1.	Segment质控，去除不理想的AOI/ROI； 
+<br>2.	Probe质控，剔除Outlier Probe；
+<br>3.	Normalization质控，帮助进行数据标准化/归一化。
+
+<center>![](`r paste0(list_param[["extdata_path"]],  "Flowchart/WTAQC.png") `){width="60%"}</center>
+
+<details>
+<summary>数据的质量控制标准</summary>
+```{r QC-filtering-cutoff-tb, results = 'asis'}
+tb_QC_cutoff <- readxl::read_xlsx(
+  paste0(
+    getwd() %>%
+      str_remove("raw_rmd$") %>%
+      str_remove("rmd_modules$"),
+    Resource_info_Path %>%
+      str_remove("^\\."),
+    "Permanent_Information/permanent_info.xlsx"
+  ),
+  sheet = "DSP_CTA_QC_cutoff"
+) %>%
+  dplyr::filter(., !(.[, "Criteria"] == "No template control count")) %>%
+  dplyr::filter(., !(.[, "Criteria"] == "Negative probe count geomean"))
+
+
+  cat("<br>")
+ 
+  print(kable(tb_QC_cutoff, style = 'html', row.names = F, table.attr = "class=\'epars-tbl\'"))
+cat("<br>")
+```
+</details>
+
+```{r qc_dir, results = 'hide'}
+CachePath <- sub('[/][^/]+$', '/1.Quality_Control/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/1.Quality_Control/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+
+<!-- <details> -->
+<!-- <summary>数据的质量控制标准</summary> -->
+
+<!-- ```{r negative_Probe_Count4, results = 'asis', fig.width = 8} -->
+<!-- dat<-readxl::read_excel(list_param$norm_data_path,sheet = 5) -->
+<!-- cat("<br>") -->
+
+<!-- dat[23:41,] -> dat -->
+<!-- data.frame(dat[1:nrow(dat) %% 2 %>% as.logical() %>% which(),],dat[1:nrow(dat) %% 2 %>% as.logical() %>% which() %>% {.+1} ,]) %>% na.omit()->dat -->
+<!-- dat[,c(3,2,4)] -> dat -->
+<!-- colnames(dat)<-c("标准","是否过滤","过滤参数") -->
+<!-- dat[1,3]<-  paste(">",dat[1,3]) -->
+<!-- dat[2,3]<-  paste(">",dat[2,3], "%") -->
+<!-- dat[3,3]<-  paste(">",dat[3,3], "%") -->
+<!-- dat[4,3]<-  paste(">",dat[4,3], "%") -->
+<!-- dat[5,3]<-  paste(">",dat[5,3], "%") -->
+<!-- dat[6,3]<-  paste(">",dat[6,3]) -->
+
+<!-- dat[7,3]<-  paste("<",dat[7,3]) -->
+<!-- dat[8,3]<-  paste("<",dat[8,3], "square microns") -->
+<!-- dat[9,3]<-  paste(">",dat[9,3]) -->
+
+<!-- print(kable(dat, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'")) -->
+<!-- cat("<br>") -->
+<!-- cat("<br>") -->
+
+<!-- ``` -->
+
+<!-- </details> -->
+
+
+QC相关的数据图表将被保存至 **`r CachePath`**。
+
+## Segment QC
+
+针对每一个选取的AOI/ROI进行严格的多维度质量控制。如果有任何一项指标未能达到QC标准，则深入分析此AOI/ROI，确认其数据QC未通过以及数据偏离性的原因主要为实验流程而非生物学过程后，会剔除该AOI/ROI，不会将其纳入后续的标准化分析中。多个方面的Segment
+QC的具体参数指标包括：
+
+### Technical Signal QC
+
+Technical Background QC是GeoMx DSP设置的运行对照[@GeomxTools]，分为以下几个指标： 
+
+#### Parameters of AOI/ROI
+
+GeoMx DSP针对每个AOI/ROI的Nuclei Counts和Surface Area给出了建议的质控阈值。建议每个AOI/ROI的Nuclei Counts高于100为最佳，低于20时应考虑滤除该AOI/ROI不纳入后续下游分析；当Surface Area < 16000平方微米时，存在AOI/ROI表面积过低的情况也需要考虑是否滤除该AOI/ROI。本次WTA实验中，AOI/ROI的Nuclei Counts以及Surface Area数据均通过检验，没有进行滤除，详细数据可参见上方AOI/ROI信息表格。
+```{r Parameters}
+ann=exp_group_object@anno
+ann$Group="Warning"
+ann$Group[ann$AOINucleiCount>100&ann$AOISurfaceArea>1600]="Pass"
+ann|>ggplot(aes(x=AOINucleiCount,y=AOISurfaceArea,color=Group))+
+  geom_point(size=4,alpha=0.7)+scale_color_manual(values = c(Warning="yellow",Pass="blue"))+
+  xlim(0, max(ann$AOINucleiCount))+ylim(0, max(ann$AOISurfaceArea))+theme_bw()+
+   geom_vline(xintercept =100,linetype = 2)+   geom_hline(yintercept =1600,linetype = 2)+labs(x = "AOI Nuclei Count",y= "AOI Surface Area")
+```
+
+### Technical Signal QC
+
+<details>
+<summary>Technical Signal QC 指标</summary>
+<div class=details_text>
+Technical Signal QC是每个AOI/ROI的测序质量评价，包含以下三个指标：
+<br>1.	Raw Reads数据量：测序时AOI/ROI所有的原始测序Reads序列。合格AOI/ROI的原始测序Reads应>1000；
+<br>2.	Aligned Reads Percentage：AOI/ROI中比对到模板序列的Reads序列的比例。合格AOI/ROI的比对率应>80%；
+<br>3.	Sequencing Saturation：测序饱和度是指至少被检测到2次的Read在Raw Reads中的占比：100%测序饱和度表示AOI/ROI具有代表性；0%测序饱和度表示所有Reads都是唯一的。建议AOI/ROI的测序饱和度应>50%。
+</details>
+下图为其中比对率QC结果展示，横轴代表每个AOI/ROI的原始测序Reads数，纵轴代表每个AOI/ROI中的Reads比对到模板序列的比对率，图中虚线代表比对率的建议阈值，每个点代表一个AOI/ROI。
+<br><dsrcp>`r if("Technical signal QC" %in% names(dscrp_list)){dscrp_list["Technical signal QC"]} `</dsrcp>
+
+```{r Alignment-QC-plot, results = 'asis', fig.width = 8}
+setMethod("AlignmentQC", "DSP_data", function(object, AlignedReads = "AlignedReads",RawReads = "RawReads",
+          CachePath = CachePath,  FigWidth = 6, FigHeight = 6, prefix = "QC_Aligned_Rate"){
+  suppressPackageStartupMessages(library(ggplot2))
+  if ("Aligned_Rate" %in% colnames(object@anno) == FALSE){
+    object@anno$Aligned_Rate <- round(object@anno[["AlignedReads"]]/object@anno[["RawReads"]]*100, 2)
+  }
+  p <- ggplot(object@anno, aes(x = RawReads, y = Aligned_Rate)) +
+        # geom_bar(stat="identity", fill="steelblue")+
+        geom_point(size=3, color=desat("#4e84cc", 0.8)) +
+        geom_hline(yintercept = 80, linetype='dotted', col = '#984EA3') +
+        annotate("text", x = 8000000, y = 70, label = "Aligned Rate = 80%", vjust = -0.5) +
+        scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, 20)) +
+        labs(x = "Raw Reads", y = "Aligned Rate (%)",title = "")+ theme_minimal()
+  subchunkify(p, fig_width = FigWidth, fig_height = FigHeight)
+  ggsave(paste0(PlotsPath, prefix, ".pdf"), plot = p, width = FigWidth, height = FigHeight)
+  return(object)
+})
+
+exp_group_object <- AlignmentQC(exp_group_object, CachePath = CachePath, 
+							   prefix = "QC_Aligned_Rate")
+
+```
+
+
+
+
+```{r Gene_Filtering,results='asis'}
+if(LOQ_Filter){
+cat("
+### Gene Filtering
+
+除了Segment和Probe QC，我们还确定了每个Segment的检测限 (LOQ)。 LOQ 是根据阴性对照探针的分布计算的，旨在近似每个Segment 基因表达的可量化限制。但LOQ 可能无法准确反映阴性探针计数低（例如：LOQ < 2）的Segment中的真实检测率。 LOQ 的计算公式为：
+
+$$
+LOQ_{i} = geomean(NegProbe_{i}) * geoSD(NegProbe_{i})^{n}
+$$
+
+
+本研究使用2倍的几何标准差作为 LOQ 阈值。
+
+我们将绘制在不同百分比的片段中检测到的基因总数。基于下面的可视化，我们可以更好地了解我们研究中的全局基因检测，并选择从数据集中过滤出多少个低检测基因。基因过滤提高了下游统计测试的性能，并改善了对真实生物信号的解释。我们通常根据数据集的生物多样性设置5-20%的%段截止值")
+  
+  
+
+plot_detect <- data.frame(Freq = c(0, 1, 5, 10, 20, 30, 50))
+h=lapply(exp_group_object@anno$SegmentDisplayName, function(.x){
+  LOQ=exp_group_object@anno[[names(exp_group_object@anno)[str_detect(names(exp_group_object@anno),regex("LOQ"))]]][exp_group_object@anno$SegmentDisplayName==.x]
+  return(exp_group_object@raw_exp[,.x]>LOQ)
+})%>%do.call(data.frame,.)
+DetectionRate=apply(h, 1, function(.x){
+  sum(.x)/length(.x)
+})
+
+plot_detect$Number <-unlist(lapply(c(0.00, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5),
+                function(x) {sum(DetectionRate >= x)}))
+plot_detect$Rate <- plot_detect$Number / nrow(exp_group_object@raw_exp)
+rownames(plot_detect) <- plot_detect$Freq
+p=ggplot(plot_detect, aes(x = as.factor(Freq), y = Rate, fill = Rate)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = formatC(Number, format = "d", big.mark = ",")),
+            vjust = 1.6, color = "black", size = 4) +
+  scale_fill_gradient2(low = "orange2", mid = "lightblue",
+                       high = "dodgerblue3", midpoint = 0.65,
+                       limits = c(0,1),
+                       labels = scales::percent) +
+  theme_bw() +
+  scale_y_continuous(labels = scales::percent, limits = c(0,1),
+                     expand = expansion(mult = c(0, 0))) +
+  labs(x = "% of Segments",
+       y = "Genes Detected, % of Panel > LOQ")
+
+#ggsave(paste0(CachePath,"Gene_Filtering.pdf"),p)
+
+print(p)
+}
+```
+
+``` {r gene_filter_results,results = 'asis'}
+if(LOQ_Filter) {
+  dat = exp_group_object@raw_exp[rownames(exp_group_object@raw_exp) %in% names(DetectionRate[DetectionRate >
+                                                                                               LOQ_Filter / 100]), ]
+  cat("过滤前后对比")
+  
+  
+  print(
+    kable(
+      data.frame(
+        `基因数量` = exp_group_object@raw_exp %>% nrow ,
+        `滤除的基因数` = exp_group_object@raw_exp %>% nrow - dat %>% nrow ,
+        `保留的基因数` =  dat %>% nrow
+      ),
+      format = 'html',
+      row.names = F,
+      table.attr = "class=\'epars-tbl\'"
+    )
+  )
+  row.names(exp_group_object@raw_exp[rownames(exp_group_object@raw_exp) %in%
+                                       names(DetectionRate[DetectionRate > LOQ_Filter / 100]),]) %>% writeLines("filter_gene.txt")
+  
+  exp_group_object@raw_exp = exp_group_object@raw_exp[rownames(exp_group_object@raw_exp) %in%
+                                                        names(DetectionRate[DetectionRate > LOQ_Filter / 100]), ]
+  
+  
+  exp_group_object@exp = exp_group_object@exp[rownames(exp_group_object@exp) %in%
+                                                names(DetectionRate[DetectionRate > LOQ_Filter / 100]), ]
+}
+```
+
+<br>
+
+<!-- #### Negative Probe Count {.tabset .tabset-fade} -->
+
+<!-- <details> -->
+
+<!-- <summary>阴性探针介绍</summary> -->
+
+<!-- <div class=details_text> -->
+
+<!-- Nagative Probe, 阴性探针，是DSP-WTA的实验过程中加入的非人源的探针序列。在正常的实验过程中，非人源的探针序列理论上会进行一定比例的非特异性结合，产生非特异性的Counts计数。NanoString设计加入这些阴性探针用以监控实验的特异性。 -->
+
+<!-- 通过计算每个AOI/ROI中的阴性探针的计数，可以衡量本WTA实验的整体技术信号水平。技术信号过低则需要考虑AOI/ROI面积是否太小、建库流程是否规范以及测序深度是否过低。根据NanoString提供的阴性探针测量经验，WTA实验的技术信号的阈值建议设置为4。 -->
+
+<!-- </details> -->
+
+<!-- 本实验阴性探针QC的结果如下图，横坐标为每个AOI/ROI的阴性探针读数，纵坐标为检测的AOI/ROI，虚线代表设定的技术信号阈值 4 ，若存在图例则展示的为每个AOI/ROI的分组着色信息。根据与项目中实验设计方案有关的AOI/ROI分组信息（**`r exp_group_object@qc_groups`**），下方按标签页呈现了不同着色方式的阴性探针计数结果。 -->
+
+<!-- <br><dsrcp>`r if("Negative Probe Count" %in% names(dscrp_list)){dscrp_list["Negative Probe Count"]} `</dsrcp> -->
+
+<br>
+
+
+
+## Normalization QC
+
+完成上方的质控步骤后需要对数据进行Normalization标准化/归一化。数据标准化的方式有多种，包括基于管家基因的背景校正方式，基于Q3的校正方式等多种。选择何种数据标准化方式需要依据各方法学、此次项目中数据的关联关系。因此在进行标准化之前需要先进行标准化QC，根据数据状态判断最佳的标准化方法。**本次项目使用的标准化方法为Q3方法**。
+
+<!-- ### HK Gene Distribution {.tabset .tabset-fade} -->
+
+<!-- <details> -->
+<!-- <summary>管家基因介绍</summary> -->
+<!-- <div class=details_text> -->
+<!-- 管家基因 HouseKeeping(HK) Genes 是指某一类基因的集合。这类基因在所有细胞中Technical Signal QC均有表达，是细胞维持基本生命活动所需的相对保守的基因。因为管家基因的表达持续并且受环境因素影响较少，所以细胞管家基因表达的几何平均数可以用作该细胞表达信号强度的参考。 -->
+<!-- </details> -->
+<!-- <details> -->
+<!-- <summary>几何平均数介绍</summary> -->
+<!-- <div class=details_text> -->
+<!-- 几何平均数(Geometric Mean, Geomean)作为一种均值表现方法，在分析过程中常被使用。它使用所有样本值的乘积来指示一组数字中的集中趋势或典型值。对于一组数字$x_{1},x_{2}, \dots, x_{n}$，它们的几何平均数的定义为:$$(\prod_{i=1}^{n} x_i)^{\frac{1}{n}} = \sqrt[n]{x_1x_2 \dots x_n}$$ -->
+<!-- <br> -->
+<!-- </details> -->
+<!-- 管家基因的表达可作为标准化方式之一的基础。为了验证基于管家基因进行数据标准化为最佳方法，需要对管家基因表达的分布进行评估。若管家基因表达的分布中有明显离散数据，或是在数据分组中有明显的基于数据分组信息的聚集，则管家基因标准化的方法也许不是最佳的标准化方法，需谨慎使用。本项目数据中对管家基因的几何平均数进行了对数（log2）计算，计算后的表达分布情况请参见下图。横轴代表每个AOI/ROI，纵轴代表管家基因表达几何平均数的log2变换值，图例代表每个AOI/ROI的分组着色信息。根据项目中实验设计相关的AOI/ROI分组信息（**`r exp_group_object@qc_groups`**），下方呈现了不同管家基因的分布。 -->
+<!-- <br><dsrcp>`r if("HK Gene Distribution" %in% names(dscrp_list)){dscrp_list["HK Gene Distribution"]} `</dsrcp> -->
+
+<!-- ```{r HK-QC-plot, results = 'asis', fig.width = 8, fig.height = 6} -->
+<!-- template <- "#### %s {.unlisted .unnumbered} -->
+<!-- " -->
+<!-- exp_group_object <- HK_QC(exp_group_object, CachePath = CachePath,  -->
+<!-- 							 group = exp_group_object@qc_groups, -->
+<!-- 							 template = template, space = space, -->
+<!-- 						     FigWidth = 8, FigHeight = 6, -->
+<!-- 							 prefix = "QC_HK_barplot") #color_palette = color_palette -->
+
+<!-- ``` -->
+<!-- <br> -->
+
+### Q3 Normalization
+
+Quantile 3 normalization (3rd quartile of all selected targets, Q3)是另一种数据标准化的方法[@zhao2020quantile]。Q3是指对于所有表达分布中，均选取AOI/ROI分布的头部前25%表达量的数据作为标准化的依据。该种数据选取方式被证明其对整体表达分布的代表性是稳健的，且被NanoString推荐为用于DSP-NGS类型高于定量限(LOQ)数据的归一化/标准化方式。本项目其AOI/ROI表达Q3分布用直方图和密度曲线图展示，图中横轴代表Q3的log2变换值，纵轴代表数据分布的密度，直方图清晰的反映了AOI/ROI基因表达量Q3的分布情况，而密度曲线则可以反映数据的分布密度情况。
+<br><dsrcp>`r if("Q3 Normalization" %in% names(dscrp_list)){dscrp_list["Q3 Normalization"]} `</dsrcp>
+
+```{r Q30-QC-plot, results = 'asis', fig.width = 8, fig.height = 6}
+if(LOQ_Filter){
+qs <- apply(exp_group_object@raw_exp, 2, function(x) stats::quantile(x, 0.75))
+exp_group_object@anno$NormalizationFactor= ngeoMean(qs)/qs
+exp_group_object@exp=exp_group_object@raw_exp%>%apply(2,function(.x){
+  return(.x*ngeoMean(qs) /stats::quantile(.x, 0.75))
+})
+}
+Q30_QC(exp_group_object, binwidth = 0.75, CachePath = CachePath, 
+	   FigWidth = 8, FigHeight = 6, prefix = "QC_Q3_barplot")
+
+```
+
+结合上述数据标准化质控步骤，**Q3被认为是最适合本项目数据的标准化方法，即本次项目使用的标准化方法为Q3方法**。
+
+```{r opt-S4-annotaion-to-cache, results = 'hide'}
+
+## save object annotation cache into .txt or .csv files after all the QC methods
+
+write.table(exp_group_object@anno, file = paste0(CachePath, "overall_annotation.csv"),  sep = ",", row.names = T, col.names = NA)
+write.table(exp_group_object@raw_exp, file = paste0(CachePath, "raw_exp.csv"),  sep = ",", row.names = T, col.names = NA)
+write.table(exp_group_object@exp, file = paste0(CachePath, "Q30_normalization_exp.csv"),  sep = ",", row.names = T, col.names = NA)
+```
+
+<br>
+
+# 数据分析
+
+针对质控合格的数据进行了如下数据分析研究，其基本流程如下图所示：
+
+<center>
+
+![](`r paste0(Resource_info_Path,  "Flowchart/DSP_CTA_Analysis.png") `){width="60%"}
+
+</center>
+
+
+
+*上方包含的分析内容以合同约定为准，若不在合同范围内则不进行。*
+
+
+```{r overall_analysis_dir, results = 'hide'}
+CachePath <- sub('[/][^/]+$', '/2.Overall_Analysis/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/2.Overall_Analysis/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+
+基因表达谱总览的分析相关的数据图表将被保存至 **`r CachePath`**。
+
+## 基因表达谱总览
+
+本部分针对用户所选的Panel进行了基因表达谱的分析，用热图展示。热图分析使用了无监督的层次聚类来分析每个AOI的基因表达量或Signature值之间的相关性。每一列代表一个AOI/ROI，每一行是一个基因或Signature。对每个基因或Signature值分别进行了归一化处理，让均值为0和标准差为1。将归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99%
+的数据在平均值的 ±
+2倍标准偏差内）。其位于同一簇同一分支的AOI/ROI在某种程度上是相似的，不同分支的AOI/ROI相似度则较低。
+
+### 所有分组基因表达热图
+
+下图根据用户给出的分组信息，对所有分组进行聚类热图[@gu2016complex]的展示，可对AOI/ROI之间表达的相似程度进行推断。其中数据均进行了归一化处理，让均值为0和标准差为1。将归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99%
+的数据在平均值的 ±
+2倍标准偏差内）。默认使用最小方差法ward.D2聚类方法构建距离矩阵，距离值越小则AOI/ROI之间的相似度越大。其分析结果如下图所示，横轴代表每个AOI/ROI，纵轴代表用户所选Panel中的每个基因，示例注释列在热图的顶部，图例显示了AOI/ROI分组信息，其基因表达值用渐变颜色表示：
+<br><dsrcp>`r if("所有分组基因表达热图" %in% names(dscrp_list)){dscrp_list["所有分组基因表达热图"]}`</dsrcp>
+
+```{r heatmap_overall, results = 'asis', fig.width = 8}
+##绘制整体热图，判断是否有分组信息
+setMethod("Overall_Heatmap","EPARS_data",function(object, show_row_names = TRUE, row_font_size = 3, column_font_size = 4, variance_filter = F, column_split_used = 2, row_split_used = 2, tree_split = FALSE,show_col_names=FALSE){
+  if(object@config$heatmap_scale == TRUE){mtx <- htmp_scale(object@exp)}
+  if(object@config$group_stat == "none"){top_anno = NULL}
+  # step to filter the expression matrix
+  # filter out genes with low variance
+  if(variance_filter != F){
+    mtx <- as.matrix(as.data.frame(mtx) %>%
+                       mutate(variance = across(everything()) %>% as.matrix() %>% matrixStats::rowVars(.)) %>%
+                       slice_max(n = variance_filter, order_by = variance))
+    mtx <- mtx[,-ncol(mtx)]
+  }
+  if(object@config$group_stat == "none"){top_anno = NULL} else {
+    object <- epars_plot_setting(object)
+    object <- epars_heatmap_anno_data(object)
+    top_anno <- object@plot_setting$heatmap_anno
+    # check if anno is too long
+    for (i in top_anno@anno_list){
+      if (length(i@color_mapping@levels) > 10){
+        i@show_legend <- FALSE
+      }
+    }
+  }
+  htmp_color <- object@config$heatmap_color
+  p <- plot_Heatmap(mat = mtx, anno = top_anno, scale = FALSE,
+                    show_row_names = show_row_names, htmp_color = htmp_color,show_column_names = show_col_names,
+                    column_split_used = column_split_used, row_split_used = row_split_used, tree_split = tree_split)
+  return(p)
+}
+)
+
+
+p <- Overall_Heatmap(exp_group_object) #row_split_used, column_split_used,tree_split = FALSE
+if (exp_group_object@config$group_stat == "Multiple group"){multiple_group <- TRUE} else {multiple_group <- FALSE}
+subchunkify(p, fig_width = 8, fig_height = 8)
+save_pdf(p, paste0(PlotsPath, "heatmap_overall", ".pdf"), width = 8, height = 8)
+
+```

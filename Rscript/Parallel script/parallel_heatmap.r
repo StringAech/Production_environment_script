@@ -1,4 +1,4 @@
-parallel_heatmap <- function(exp_group_object, CachePath, PlotsPath, core.num = 10, pdf_height = NULL, pdf_width = NULL, ...){
+parallel_heatmap <- function(exp_group_object, CachePath, PlotsPath, core.num = 10, pdf_height = NULL, pdf_width = NULL, top = NULL, order_str = 1,...){
   # height <- height
   # width <- width
   heatmap_function <- function(g, width_ = pdf_width, height_ = pdf_height){
@@ -13,11 +13,20 @@ parallel_heatmap <- function(exp_group_object, CachePath, PlotsPath, core.num = 
     exp_group_object_single <- epars_plot_setting(exp_group_object_single)
     exp_group_object_single <- epars_heatmap_anno_data(exp_group_object_single)
     top_anno <- exp_group_object_single@plot_setting$heatmap_anno
-    filtered_list <- rownames(exp_group_object@deg[[g]]@result_df %>% 
+    if(is.null(top)){
+      filtered_list <- rownames(exp_group_object@deg[[g]]@result_df %>% 
                                 dplyr::filter(exp_group_object@deg[[g]]@result_df$change != "NOT"))
+    }else{
+      filtered_list <- rownames(exp_group_object@deg[[g]]@result_df %>% 
+                                  dplyr::filter(exp_group_object@deg[[g]]@result_df$change != "NOT") %>% 
+                                  rownames_to_column("Gene") %>% 
+                                  group_by(change) %>% 
+                                  slice_min(FDR, n = top) %>% 
+                                  column_to_rownames("Gene"))
+    }
     mtx <- subset(exp_group_object_single@exp, rownames(exp_group_object_single@exp)
                   %in% filtered_list)
-    group_df_order = order(exp_group_object_single@plot_setting$group_df[, deg_str])
+    group_df_order = order(exp_group_object_single@plot_setting$group_df[, order_str])
     ordered_sample <- rownames(exp_group_object_single@plot_setting$group_df)[group_df_order]
     htmp_color <- exp_group_object@config$heatmap_color
     mtx <- htmp_scale(mtx)
@@ -61,6 +70,7 @@ parallel_heatmap <- function(exp_group_object, CachePath, PlotsPath, core.num = 
   clusterEvalQ(cl, library(R.utils))  #添加并行计算中用到的包
   clusterEvalQ(cl, library(ComplexHeatmap))  #添加并行计算中用到的包
   clusterEvalQ(cl, library(tidyHeatmap))  #添加并行计算中用到的包
+  clusterEvalQ(cl, library(tidyverse))  #添加并行计算中用到的包
   enrichment.res <- parLapply(cl, names(exp_group_object@deg), heatmap_function)
   parallel::stopCluster(cl)
 }

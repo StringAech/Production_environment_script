@@ -1,0 +1,1491 @@
+---
+# title: "DSP CTA 标准分析报告"
+# author: "Hu Tianmu (Timo)"
+# date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    number_sections: true
+    theme: paper
+    smooth_scroll: false
+    keep_md: false
+    highlight: tango
+    self_contained: true
+    dev: "png"
+    df_print: paged
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+  params:
+    json_path: "./raw_data/list_param.json"
+    extdata_path: "./resource/extdata/"
+    resource_path: "./resource/"
+bibliography: resource/ref.bib
+csl: resource/ieee.csl
+link-citations: true
+---
+
+```{r Advanced-setup-wd, include = F}
+
+knitr::opts_knit$set(root.dir = dirname(getwd()),cache = TRUE,cache.lazy = FALSE)
+Response="Response"
+suppressPackageStartupMessages(library(rlang))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(glmnet))
+suppressPackageStartupMessages(library(hash))
+suppressPackageStartupMessages(library(compareC))
+suppressPackageStartupMessages(library(KernSmooth))
+suppressPackageStartupMessages(library(survcomp))
+suppressPackageStartupMessages(library(survivalROC))
+suppressPackageStartupMessages(library(mvtnorm))
+suppressPackageStartupMessages(library(DescTools))
+suppressPackageStartupMessages(library(broom))
+suppressPackageStartupMessages(library(survminer))
+suppressPackageStartupMessages(library(pROC))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(ggsci))
+suppressPackageStartupMessages(library(factoextra))
+suppressPackageStartupMessages(library(patchwork))
+suppressPackageStartupMessages(library(scales))
+suppressPackageStartupMessages(library(EPARS))
+
+#load("/home/rstudio/user/guohao/git/epars_rmd_new/WTA_A.RData")
+```
+
+# 高级分析
+
+## 表达谱空间信息 {.tabset .tabset-fade}
+
+```{r spatial-circ-boxplot-background, results = 'hide'}
+
+# 输出玻片相关文字信息
+num_AOI <- nrow(exp_group_object@anno)
+if("SlideName" %in% names(exp_group_object@anno)){
+	unique_slide <- unique(exp_group_object@anno$SlideName)
+	num_slide <- length(unique_slide)
+}
+```
+
+对每个AOI/ROI，结合其表达谱数据和对应空间坐标信息，将表达水平在对应空间坐标位置呈现，从而便于从空间信息维度理解表达数据。对于项目中包含的每张玻片，下方每张玻片标签页下使用环形柱状图分别展示单张拨片中AOI/ROI对应位置的基因表达水平；单张玻片下再用前置差异分析的分组为标签页，分别展示该差异分析下前10个最显著的基因的表达水平。环形柱状图的横纵坐标代表玻片的真实空间坐标信息，环形柱状图的不同颜色代表不同的基因，柱状图的高度(半径)体现基因表达水平的高低。本项目共包含 **`r paste0(num_AOI)`** 个AOI/ROI，来自 **`r paste0(num_slide)`** 张玻片  **`r paste0(unique_slide, collapse="、")`**。
+
+```{r spatial-circ-boxplot, results = 'asis', fig.width = 12, fig.height = 15}
+
+# 循环title
+template <- "#### 差异分组: %s {.unlisted .unnumbered}
+"
+title_template <- "### 玻片: %s {.tabset .tabset-fade .unnumbered}
+"
+
+object <- exp_group_object
+
+# 外圈循环， 以玻片为单位
+for (per_slide in unique_slide){
+	cat(sprintf(title_template, paste0(per_slide)))
+  # 内圈循环，以差异分析为单位
+  for (g in names(object@deg)){
+  	# cat(sprintf(template, paste0(object@deg[[g]]@label_string)))
+  	# cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(object@deg[[g]]@natural_annotation)))
+  	# 
+  	# 提取差异分析中最显著的基因个数
+  	sig_gene_list <- rownames(subset(object@deg[[g]]@result_df, 
+  	                                 change != 'NOT') %>% slice_min(FDR, n = 10))
+  	AOI_list <- rownames(subset(object@anno, SlideName == per_slide))
+  	# 筛选差异分析分组包含的AOI
+  	AOI_list <- AOI_list[AOI_list %in% object@deg[[g]]@filtered_sample]
+  	# 如果没有差异结果则跳过
+  	if(length(sig_gene_list) == 0 | length(AOI_list) == 0){
+  	  next
+  	}else{
+  	  # 提取本玻片上的AOI队列
+  	AOI_list <- rownames(subset(object@anno, SlideName == per_slide))
+  	# 筛选差异分析分组包含的AOI
+  	AOI_list <- AOI_list[AOI_list %in% object@deg[[g]]@filtered_sample]
+  	# 如果差异AOI不在这张破片上则跳过
+  	# if(length(AOI_list) == 0){
+  	#   next
+  	#   }else{
+  	 # 开始绘图模块
+  	cat(sprintf(template, paste0(object@deg[[g]]@label_string)))
+  	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(object@deg[[g]]@natural_annotation)))
+  	suppressPackageStartupMessages(library(tidyverse))
+    suppressPackageStartupMessages(library(data.table))
+    suppressPackageStartupMessages(library(plotrix))
+    suppressPackageStartupMessages(library(ggforce))
+    # 提取坐标
+    coordinates <- t(object@anno[,c("ROICoordinateX", "ROICoordinateY")])
+    # 筛选矩阵只保留显著10个基因
+    if(length(sig_gene_list)<2){
+      exp <- object@exp[rownames(object@exp) %in% sig_gene_list, ] %>% as.matrix()
+      colnames(exp) <- sig_gene_list
+      exp <- t(exp)
+    }else{
+      exp <- object@exp[rownames(object@exp) %in% sig_gene_list, ]
+    }
+    
+    plotting_data <- as.data.frame(t(rbind(coordinates, exp)))
+    # 过滤样本只保留本玻片的样本
+    plotting_data <- plotting_data[rownames(plotting_data) %in% AOI_list, ]
+    plotting_data$AOI <- rownames(plotting_data)
+    plotting_data <- plotting_data %>% tidyr::pivot_longer(-c(ROICoordinateX,
+                                                              ROICoordinateY, AOI))
+    plotting_data <- plotting_data %>% group_by(AOI) %>% mutate(start_location = 
+                            (1:n()-1) /n()*pi*2, end_location = 1:n() /n()*pi*2)
+    check_overplot <- as.matrix(unique(data.frame(
+                          ROICoordinateX = plotting_data$ROICoordinateX,
+                          ROICoordinateY = plotting_data$ROICoordinateY)))
+    class(check_overplot) <- "numeric"
+    # check_overplot_modified <- invisible(plotrix::cluster.overplot(check_overplot, 
+    #                                                                plot = FALSE))
+    # check_overplot_modified <- overplot(check_overplot)
+    # plotting_data <- data.frame(check_overplot, check_overplot_modified) %>%
+    #                   full_join(plotting_data)
+    plotting_data <- suppressMessages(data.frame(check_overplot) %>% full_join(plotting_data))
+    
+    p <- ggplot(plotting_data) + geom_arc_bar(aes(x0 = ROICoordinateX, y0 = -ROICoordinateY,
+            r0 = 0, r = sqrt(value * 8e7 / max(value)), start = start_location,
+            end   = end_location, fill  = name), alpha = 0.65, color = "transparent") + 
+            geom_text(aes(x = ROICoordinateX, y = -ROICoordinateY, label = AOI), size = 2,
+            hjust = 0.5, vjust = 3, check_overlap = T) + coord_fixed() + theme_bw() +
+            scale_fill_manual("Genes", values = object@config$pan_color) +
+            xlab("Slide_Coordinate_X") + ylab("Slide_Coordinate_Y") +
+            theme(panel.grid=element_blank())
+    subchunkify(p, fig_height = 15, fig_width = 12)
+	  ggsave(paste0(PlotsPath, "Spatial_expression_circular_barplot_", gsub(" ", "_", g),
+	                "_on_slide_", per_slide, ".pdf"), plot = p, height = 15, width = 12)
+	  cat(space)
+  	# }
+  	}
+    
+  }
+	cat(space)
+}
+
+```
+
+
+<br><br><br>
+
+## Signature 挖掘
+
+对于拥有临床信息的数据集，我们往往希望可以从数据集中样本对应的临床分组中发现规律，从而可以预测新个体的临床发展趋势。这个流程属于机器学习算法中的分类器，或通常被称为<span class="highlight"> 建模 </span>。
+<details>
+<summary> 模型泛化：岭回归、Lasso回归和弹性网络的介绍</summary>
+<div class=details_text>
+虽然建模的最终目的为提升对数据分类的准确性，但如果过于追求局限数据集中的准确率而建立了庞杂精细的模型，就往往不能够适应当前数据以外的新数据，例如只对教材包含的例题反复学习的学生面对包含新样式考试题目时可能不能从容应对。此现象又被称为<span class="highlight"> 过拟合 </span>(Overfitting)。
+<br><span class="highlight"> 模型泛化 </span>(Generalization)，是指针对模型过拟合的问题，在基于已知数据集的训练中通过不同的方式，降低模型对于已知数据集特征的敏感性，提升模型应用到新数据上适应能力的过程。
+<br><span class="highlight"> 岭回归 </span>(Ridge Regression) 是模型泛化的建模路径的一种。与标准线性回归不同的是岭回归在建立模型的过程中加入L2正则化(Regulization)，引入的少量偏差并增加了对已知数据特征敏感性的惩罚，此方法使得模型在不同数据集中表现差距降低，从而防止模型过拟合。
+<br><span class="highlight"> Lasso回归 </span>(Least Absolute Shrinkage and Selection Operator Regression) 是模型泛化的建模路径的另一种。Lasso回归加入了L1正则化，与岭回归一样都可以对模型中系数进行收缩从而减少模型过拟合，但Lasso回归的惩罚函数略有不同，可以将模型某些系数的权重缩减至0，即允许假设部分数据特征对模型预测完全无用。因此Lasso回归建模的过程中往往伴随着特征筛选(Feature Selection)的过程，便于在样本特征繁多，例如未经筛选的全基因组检测的表达数据中精炼模型探寻核心信号。
+<br><span class="highlight"> 弹性网络 </span>(Elastic Net) 是结合了岭回归和Lasso回归的一种方式。在保留Lasso回归筛除系数的可能性下，降低将相关性较强的特征错误筛除的可能性，通过小批量梯度下降的方式结合了两种回归优势，从而更有效地建立预测模型。
+</details>
+
+本项目通过建模生成多个不同权重基因组合成的Signature特征，用以预测新个体的临床发展。整个过程的基本流程如下图所示：
+
+<center>![](`r paste0(Resource_info_Path, "Flowchart/Signature_Mining.png") `){width=85%}</center>
+<div class="fig_caption">*Signature挖掘的个性化程度较高，可能存在方法学细节变动，以实际分析流程为准。*</div>
+
+流程中，数据集分离将所有数据分为训练集和验证集，只针对训练集数据进行模型训练，从而可以使用未被触碰的验证数据集对模型的准确性进行评估验证，同时也侧面降低模型的过拟合的可能。
+<br>在训练集⾥应⽤Cox比例风险评估模型筛选特征基因后，使用弹性网络回归方法进行模型建立，并通过交叉验证的多次迭代和模型性能验证，得到稳定性、预测性能最高的模型。因产出模型为多个带权重基因队列的集合，又可称该模型为Signature模型。
+
+### 疗效数据的Signature挖掘
+
+```{r response-Sig-mining-dir, results = 'hide'}
+CachePath <- sub('[/][^/]+$', '/8.Signature_Mining_Response/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/8.Signature_Mining_Response/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+使用疗效数据进行的Signature挖掘相关的数据图表将被保存至 **`r CachePath`**。
+
+```{r response-Signature-mining-background, results = 'hide', fig.width = 10}
+
+suppressPackageStartupMessages(library(rlang))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(glmnet))
+suppressPackageStartupMessages(library(hash))
+suppressPackageStartupMessages(library(compareC))
+suppressPackageStartupMessages(library(KernSmooth))
+suppressPackageStartupMessages(library(survcomp))
+suppressPackageStartupMessages(library(survivalROC))
+suppressPackageStartupMessages(library(mvtnorm))
+suppressPackageStartupMessages(library(DescTools))
+suppressPackageStartupMessages(library(broom))
+suppressPackageStartupMessages(library(survminer))
+suppressPackageStartupMessages(library(pROC))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(ggsci))
+suppressPackageStartupMessages(library(factoextra))
+suppressPackageStartupMessages(library(patchwork))
+suppressPackageStartupMessages(library(plotROC))
+
+#读取基因表达量数据，做一些基本处理，得到基因表达和clinic输入数据，输入数据格式：基因表达数据行为基因，列为样本，clinic数据格式：行为样本列为临床信息
+# load(file="./raw_data/test.RData")
+
+hash=hash::hash
+keys=hash::keys
+data <- exp_group_object
+
+# 在数据对象中建立clinical对象基础，用于下面的分析
+data <- EPARS_clinical_creation(data, label = "response")
+
+# 随机生成训练样本，训练样本和测试样本保存在@train_sample和@test_sample属性
+data@clinical$response <- train_validate_sampling(data@clinical$response,
+												  train_sample_ratio = 0.7, seed = 10086)
+
+# 根据数据对象中的@train_sample和@test_sample生成测试和训练数据对象
+response_training <- get_sub_data_class(data@clinical$response, type = "training")
+response_testing <- get_sub_data_class(data@clinical$response, type = "testing")
+
+# 对训练集的95分位极值做缩尾处理
+response_training <- remove_outliners(response_training)
+
+# 单基因U-test(Mann-Whitney test)分析，寻找与疗效响应显著相关的基因
+response_training <- utest_single_gene(response_training, 
+												response="Response", cutoff = 0.05)
+
+# # 如果基因仍然太多，需要进行特征筛选，使用AUC?
+ response_training@univariate_cox_sign <- response_training@univariate_cox_sign[
+  response_training@univariate_cox_sign[, 2] >= 0.8, ]
+
+#迭代多次，使用cox+enet方法训练模型，从而找到最稳当且性能最佳的模型
+# 多次迭代来计算最佳的预后相关多因素基因组合，
+# lamdba="average"是指使用lambda min + lambda 1se的均值来获取最佳基因组合，有时可能无结果。
+# lamdba="min"是指使用lambda min来获取最佳基因组合，有时可能过拟合。
+# 结果保存在类的@reshash属性中
+response_training <- binomial_proportional_hazards(response_training, alpha = 0.8,
+									response_input = "Response", iteration = 500, nfolds = 10,
+									lambda = "average")
+
+#提取多次迭代的最佳模型的基因和系数
+response_training <- get_best_model(response_training)
+
+# 保存各子数据集的risk得分
+response_training <- risk_counting(response_training, response_training@best_model)
+response_testing <- risk_counting(response_testing, response_training@best_model)
+response_total <- risk_counting(data@clinical$response, response_training@best_model)
+
+
+# pvalue_train <- wilcox.test(Risk_score~Response, 
+#                         data = response_training@risk_score_clinic)$p.value
+# pvalue.test.boxplot <- wilcox.test(Risk_score~Group, data = gep_clinic_class_test@risk_score_clinic)$p.value
+# pvalue.total.boxplot <- wilcox.test(Risk_score~Group, data = gep_clinic_class_total@risk_score_clinic)$p.value
+
+
+```
+
+#### 模型迭代频次
+
+在建立疗效相关预测模型的过程中，会使用交叉验证的多次迭代的方式，通过不断地随机选取数据集中的子集来获得相对带有随机性的模型；交叉验证的方法中，出现频率最高的模型被认为是准确率最高的模型。同时因弹性网络的回归方法包含Lasso回归的部分特质，所以每次迭代中会对基因进行特征筛选。在大量迭代后，出现频率最高的模型所保留的基因个数即为最适合的特征筛选方案。
+<br>下方箱线图呈现了多次迭代中包含不同模型被选择的频率，横坐标代表不同的模型，纵坐标代表该模型在迭代中出现的频率，按出现频率大小从左往右依次排列。请注意，横坐标上每个模型的名称带有每个模型包含的基因个数。包含同样基因个数的模型可能会包含不同的基因队列，因此在名称最后添加后缀作区分使用。在交叉验证过程中，出现频率更高的模型被认为相对稳定性更高，其经历的特征筛选会被保留，且该模型会被用作最佳模型的参考。
+
+```{r response-Signature-mining-model-freq, results = 'asis', fig.width = 7, fig.height = 6}
+#画模型多次迭代出现的频率分布图
+p <- plot_model_freq(response_training)
+subchunkify(p, fig_width = 7, fig_height = 6)
+ggsave(paste0(PlotsPath, "Signature_mining_Model_Iteration_Frequency.pdf"),
+	                      plot = p, width = 7, height = 6)
+```
+
+#### 最佳Signature模型
+
+针对上方训练集模型构建的迭代结果，选择了如下方表格所示的基因集合组成的Signature进行了模型的建立。下方表格中，第一列代表了模型中包含的基因，第二列代表了每个基因在模型中对应的权重。
+
+```{r response-Signature-mining-model-tbl, results = 'asis'}
+tbl <- response_training@best_model[-1, ]
+colnames(tbl) <- c("Gene in model", "Coefficients")
+
+tbl <- tbl[order(tbl$Coefficients),]
+print(kable(tbl, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'", align = "c"))
+
+cat("<br>")
+
+write.table(tbl, file = paste0(CachePath, "best_model_parameters.txt"),
+							sep = "\t", quote=F)
+```
+<br>
+
+```{r response-Signature-roc-background, results = 'hide'}
+
+
+#画ROC曲线，计算AUC，评估模型性能。
+
+training_roc <- roc(eval(parse(text = paste0("response_training@risk_score_clinic$`",Response,"`"))), response_training@risk_score_clinic$Risk_score)
+testing_roc <- roc(eval(parse(text = paste0("response_testing@risk_score_clinic$`",Response,"`"))), response_testing@risk_score_clinic$Risk_score)
+total_roc <- roc(eval(parse(text = paste0("response_total@risk_score_clinic$`",Response,"`"))), response_total@risk_score_clinic$Risk_score)
+
+p <- pROC::ggroc(list(Training = training_roc, Testing = testing_roc,
+                Total = total_roc), alpha = 0.5, size = 1.4) +
+    scale_color_manual("Dataset", values = c("indianred3", "royalblue3", "yellow4")) +
+		theme_minimal() + ggtitle("ROC of All Dataset Overlaid") +
+    annotate("text", x = 0.1, y = 0.14, color = "black", fontface = "bold", 
+             size = 3.5, label = "AUC of:            ") +
+    annotate("text", x = 0.1, y = 0.11, color = "indianred3", fontface = "bold", 
+             size = 3.5, label = sprintf("Training: %s", 
+             formatC(training_roc$auc, digits = 4, format = "f"))) +
+    annotate("text", x = 0.1, y = 0.08, color = "royalblue3", fontface = "bold", 
+             size = 3.5, label = sprintf("Testing:  %s",
+             formatC(testing_roc$auc, digits = 4, format = "f"))) +
+    annotate("text", x = 0.1, y = 0.05, color = "yellow4", fontface = "bold", 
+             size = 3.5, label = sprintf("Total:      %s", 
+             formatC(total_roc$auc, digits = 4, format = "f"))) +
+		geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color="grey", linetype="dashed")+
+		theme(plot.title = element_text(face = "bold")) +
+		xlab("Specificity (True Negative Rate)") +
+		ylab("Sensitivity (True Positive Rate)") + coord_fixed()
+
+```
+
+#### ROC曲线和AUC性能评估 {.tabset .tabset-fade}
+
+受试者工作特征 (Receiver Operating Characteristic, <span class="highlight"> ROC</span>) 是评估Signature模型性能的指标。ROC曲线可以呈现的是一个模型中分类阈值不断调整的过程中模型分类准确性的分布情况。ROC曲线中两个关键指标为<span class="highlight"> 灵敏度(Sensitivity) </span>和<span class="highlight"> 特异度(Specificity) </span>。
+
+<details>
+<summary> 灵敏度和特异度的介绍</summary>
+<div class=details_text>
+<span class="highlight"> 灵敏度(Sensitivity) </span>也可被称为真阳性率(True Positive Rate, TPR)或召回率(Recall)，指的是实际信息确实为阳性的个体中，被判断为阳性个体的比例。灵敏度的范围在0 - 1之间。
+<br><span class="highlight"> 特异度(Specificity) </span>也可被称为真阴性率(True Negative Rate, TNR) 或 1 - 假阳性率 (False Positive Rate, FPR)，指的是是实际信息确实为阴性的个体中，被判断为阴性个体的比例。特异度的范围也在0 - 1之间。
+</details>
+
+<br>ROC曲线则根据建立的模型，给出所有可能的分类阈值的情况下模型的表现情况。如下方的ROC曲线图中，横坐标代表特异度，纵坐标代表灵敏度。Signature模型在不同分类阈值时表现出的特异度和灵敏度组成二维坐标轴，则可以在下方的二维空间中画出模型在不同分类阈值下的性能情况的数个数据点，所有的数据点相连接即形成了ROC曲线。
+<br><span class="highlight"> Area Under Curve (AUC) </span> 是图中ROC曲线下与图像边界围合构成的面积，同一个模型不论分类阈值如何变化其AUC数值固定。因为横纵坐标轴范围均为0 - 1，AUC的面积也会在0 - 1之间浮动。AUC越大时模型被认为效率越好。
+
+<details>
+<summary> ROC和AUC与模型性能的对应关系</summary>
+<div class=details_text>
+ROC图中最左上角的点代表了灵敏度和特异度均为1的情况，此时AUC的面积为1；该情况描述的即为完美分类器，永远会按照真实的情况对个体进行分组。
+<br>ROC图中中间的灰色对角线左上侧的空间对应的AUC处于0.5 - 1之间，此时模型更接近真实世界中的预测模型，具有一定的预测功能但是存在分类错误的可能性。
+<br>ROC图中中间的灰色对角线对应的AUC为0.5，此时模型可以类似于随机分类，对个体的类别不做出有意义的预测。
+<br>ROC图中灰色对角线右下侧的空间对应的AUC小于0.5，此时模型比随机预测更差，直至右下角的点时，模型完全给出相反的分类结果。
+</details>
+
+<br>下方用标签页分别呈现了不同数据集的叠加、单独的训练数据集、单独的测试数据集和单独的总数据集的多种ROC曲线呈现方式，图中ROC曲线对应的AUC信息被标注在了右下角。
+
+```{r response-Signature-mining-roc, results = 'asis', fig.width = 7, fig.height = 6.5}
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+# All Combined
+title_string <- "Overlaid"
+cat(sprintf(template, title_string))
+subchunkify(p, fig_width = 7, fig_height = 6.5)
+ggsave(paste0(PlotsPath, "Signature_mining_ROC_",
+              title_string, ".pdf"), plot = p, width = 7, height = 6.5)
+cat(space)
+
+# Training Dataset
+title_string <- "Training"
+cat(sprintf(template, title_string))
+p1 <- signature_mining_roc_separate(training_roc, data_col = "indianred3",
+                                   title_name = "ROC of Training Dataset") + coord_fixed()
+subchunkify(p1, fig_width = 6, fig_height = 6.5)
+ggsave(paste0(PlotsPath, "Signature_mining_ROC_",
+              title_string, ".pdf"), plot = p1, width = 6, height = 6.5)
+cat(space)
+
+# Testing Dataset
+title_string <- "Testing"
+cat(sprintf(template, title_string))
+p2 <- signature_mining_roc_separate(testing_roc, data_col = "royalblue3",
+                                   title_name = "ROC of Testing Dataset") + coord_fixed()
+subchunkify(p2, fig_width = 6, fig_height = 6.5)
+ggsave(paste0(PlotsPath, "Signature_mining_ROC_",
+              title_string, ".pdf"), plot = p2, width = 6, height = 6.5)
+cat(space)
+
+# Total Dataset
+title_string <- "Total"
+cat(sprintf(template, title_string))
+p3 <- signature_mining_roc_separate(total_roc, data_col = "yellow4",
+                                   title_name = "ROC of Total Dataset") + coord_fixed()
+subchunkify(p3, fig_width = 6, fig_height = 6.5)
+ggsave(paste0(PlotsPath, "Signature_mining_ROC_",
+              title_string, ".pdf"), plot = p3, width = 6, height = 6.5)
+cat(space)
+
+```
+#### {.unlisted .unnumbered}
+<br>
+
+#### Signature得分分布
+
+使用最佳模型分别在训练、验证和完整数据集中进行个体的风险评估，并计算每个样本对应个体的Signature得分。
+<br>对于一个样本，其Signature Score计算公式为：
+$${Signature\ Score} =  {\textstyle \sum_{i=1}^{N}}\ (Expression_\ i\ *\ Coefficient_\ i)$$
+其中，i为模型中每一个基因参数，N为模型基因集中基因的个数。
+
+<br>使用数据集的Signature得分分布绘制每个数据集的琴线图，再将训练、测试和总数据集合并进行展示。横坐标代表个体的分组，纵坐标代表了每个个体计算得到的Signature Score，图中每个点为一个个体，琴线背景为该分组的个体数据分布情况，点和琴线按照分组进行着色。每个数据集的名称标注在了各自琴线图的上方，同时每个数据集中分组间的差异显著性p-value在琴线图的上方也进行了标注。从琴线图中可以根据不同数据集中组别间的差异体现模型的效率。
+
+```{r response-Signature-mining-score-distribution, results = 'asis', fig.width = 9, fig.height = 7}
+object <- response_training
+
+p1 <- ggplot(object@risk_score_clinic,
+			aes_string(x = Response, y = "Risk_score", col = Response, fill = Response)) + 
+      geom_violin(size = 0.3, alpha = 0.3) +
+      geom_jitter(size = 1.5, height = 0, width = 0.1) + 
+      scale_color_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+      scale_fill_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+			theme_classic2() + ylab("Signature Score") + xlab("Group") +
+      ggtitle("Training Dataset") + stat_compare_means(aes(label =..p.format..), size = 5)
+
+object <- response_testing
+p2 <- ggplot(object@risk_score_clinic,
+			aes_string(x = Response, y = "Risk_score", col = Response, fill = Response)) + 
+      geom_violin(size = 0.3, alpha = 0.3) +
+      geom_jitter(size = 1.5, height = 0, width = 0.1) + 
+      scale_color_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+      scale_fill_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+			theme_classic2() + ylab("Signature Score") + xlab("Group") +
+      ggtitle("Testing Dataset") + stat_compare_means(aes(label = ..p.format..), size = 5)
+
+object <- response_total
+p3 <- ggplot(object@risk_score_clinic,
+      aes_string(x = Response, y = "Risk_score", col = Response, fill = Response)) + 
+      geom_violin(size = 0.3, alpha = 0.3) +
+      geom_jitter(size = 1.5, height = 0, width = 0.1) + 
+      scale_color_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+      scale_fill_manual(values = desat(c("royalblue3", "indianred3"), 0.5)) +
+			theme_classic2() + ylab("Signature Score") + xlab("Group") +
+      ggtitle("Total Dataset") + stat_compare_means(aes(label = ..p.format..), size = 5)
+
+p <- p1 + p2 + p3 + guide_area() + plot_layout(ncol = 4, guides = "collect")
+subchunkify(p, fig_width = 9, fig_height = 7)
+ggsave(paste0(PlotsPath, "Signature_mining_signature_score_violinplot_all_dataset.pdf"),
+       plot = p, width = 9, height = 7)
+
+```
+
+#### 分类阈值选取
+
+```{r response-Signature-cutoff-selection-background, results = 'hide'}
+
+# 获得训练数据集ROC曲线坐标
+training_coords <- coords(training_roc, "all")
+# Youden Index方法获得最佳阈值
+best_coords <- coords(training_roc, "best", best.method = "youden")
+```
+
+灵敏度和特异度是用来评估分类器能否准确分辨阴性和阳性的重要参数，自然也是评估分类器模型性能的关键。理论上完美的分类器的分类阈值希望达到灵敏度和特异度都为1的性能，但实际过程中，随着灵敏度的增长，特异度会不可避免地出现下降，反之亦然。如何选择分类器的分类阈值需要考虑模型的应用场景和需求，不同的使用场景没有唯一的“最佳”性能。
+<br>选取分类阈值有多种方法，此处选择使用<span class="highlight"> Youden Index </span>，即最大化灵敏度和特异度的和<span class="highlight"> max(Sensitivity + Specificity) </span>。
+<br>通过上述方法，本模型中的Signature得分的阈值为： `r formatC(best_coords$threshold, digits = 3, format = "f")`， 意味着若一个个体的Signature Score 大于此阈值，则认为该个体属于分类类别中的阳性；反之则属于阴性。
+<br>下方使用折线图展示模型中灵敏度和特异度在不同阈值下的分布情况。横坐标为分类器分类阈值，纵坐标代表灵敏度和特异度的数值，实线为两个数值的分布。红色着色代表特异度，蓝色着色代表灵敏度。按照上述阈值选取的方法找到了最佳分类阈值，在图中用灰色虚线展示。对应最佳分类阈值时模型的灵敏度和特异度同样用对应颜色的虚线展示。
+
+```{r response-Signature-cutoff-selection-plotting, results = 'asis', fig.width = 8, fig.height = 6}
+
+p <- ggplot() +
+      geom_line(data = training_coords, aes(x = threshold, 
+      y = specificity), color = "indianred3", alpha = 0.5, size = 1.4) +
+      geom_line(data = training_coords, aes(x = threshold, 
+      y = sensitivity), color = "royalblue3", alpha = 0.5, size = 1.4) +
+      theme_classic2() + xlab("Signature Score Cutoff") + 
+      ylab("Specificity / Sensitivity") +
+  	  geom_hline(aes(yintercept = best_coords$specificity), linetype = "dotted", 
+  	             color = desat("indianred3", 0.5), size = 1, alpha = 0.8) +
+	    geom_text(aes(0, best_coords$specificity, label = paste0("Specificity Chosen: ",
+
+	         best_coords$specificity), vjust = -0.6, hjust = -0.05), color = "indianred3") +
+      geom_hline(aes(yintercept = best_coords$sensitivity), linetype = "dotted", 
+                 color = desat("royalblue3", 0.5), size = 1, alpha = 0.8) +
+	    geom_text(aes(0, best_coords$sensitivity-0.02, label = paste0("Sensitivity Chosen: ",
+	         best_coords$sensitivity), vjust = 0.6, hjust = -0.05), color = "royalblue3") +
+      geom_vline(aes(xintercept = best_coords$threshold), linetype = "dashed", 
+  	       color = "grey50", size = 1, alpha = 0.8) +
+	    geom_text(aes(best_coords$threshold, 0, label = paste0("Score Cutoff Chosen: ",
+	         formatC(best_coords$threshold, digits = 3, format = "f")), 
+	         vjust = -1, hjust = -0.2), color = "grey50") 
+subchunkify(p, fig_width = 8, fig_height = 6)
+ggsave(paste0(PlotsPath, "Signature_mining_cutoff_selection.pdf"), 
+        plot = p, width = 8, height = 6)
+ 
+```
+
+```{r response-Signature-cutoff-recalculate-background, results = 'hide'}
+# 保存各子数据集的risk得分
+response_training <- risk_counting(response_training, response_training@best_model,
+                                   cutoff = best_coords$threshold)
+response_testing <- risk_counting(response_testing, response_training@best_model,
+                                   cutoff = best_coords$threshold)
+response_total <- risk_counting(data@clinical$response, response_training@best_model,
+                                   cutoff = best_coords$threshold)
+```
+
+#### 得分分组箱线图 {.tabset .tabset-fade}
+
+下方针对每个数据集的Signature得分分布箱线图中，横坐标代表每个个体，纵坐标代表了对应每个个体计算得到的Signature Score与分类阈值的差距，箱线图的着色根据个体真实的临床信息分组决定。根据模型的阈值设定，箱线图中朝向为上的与朝向为下的个体分别被模型归纳预测为两个不同的组别。结合模型预测的类别和样本着色代表的真实临床信息，可以观察模型的准确性等性能。
+
+```{r response-Signature-mining-score-boxplot, results = 'asis', fig.width = 9, fig.height = 7}
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+# Training Dataset
+title_string <- "Training Dataset"
+
+
+#response_colname = "PanCK_Pos"
+p <- signature_score_boxplot(object = response_training, title_name = title_string, 
+                             sample_ID_colname = "SegmentDisplayName",response_colname = Response,
+                             cutoff = best_coords$threshold)
+cat(sprintf(template, title_string))
+subchunkify(p, fig_width = 9, fig_height = 7)
+ggsave(paste0(PlotsPath, "Signature_mining_signature_score_distribution_",
+              title_string, ".pdf"), plot = p, width = 9, height = 7)
+cat(space)
+
+# Testing Dataset
+title_string <- "Testing Dataset"
+p <- signature_score_boxplot(response_testing, title_name = title_string, 
+
+                             sample_ID_colname = "SegmentDisplayName",response_colname = Response,
+                             cutoff = best_coords$threshold)
+cat(sprintf(template, title_string))
+subchunkify(p, fig_width = 9, fig_height = 7)
+ggsave(paste0(PlotsPath, "Signature_mining_signature_score_distribution_",
+              title_string, ".pdf"), plot = p, width = 9, height = 7)
+cat(space)
+
+# Total Dataset
+title_string <- "Total Dataset"
+p <- signature_score_boxplot(response_total, title_name = title_string,
+
+                             sample_ID_colname = "SegmentDisplayName",response_colname = Response,
+                             cutoff = best_coords$threshold)
+cat(sprintf(template, title_string))
+subchunkify(p, fig_width = 9, fig_height = 7)
+ggsave(paste0(PlotsPath, "Signature_mining_signature_score_distribution_",
+              title_string, ".pdf"), plot = p, width = 9, height = 7)
+cat(space)
+
+```
+#### {.unlisted .unnumbered}
+<br>
+
+#### 模型基因热图
+
+
+对挖掘出的Signature模型中包含的所有基因的表达水平使用无监督聚类热图展示。热图中每一列代表一个个体，每一行代表模型中包含的一个基因，对个体和基因均使用Ward.D2的无监督层次聚类，相似表达水平的个体或基因在热图中会更加接近。对每个基因进行Z-Score的归一化处理，使得基因在所有个体中的表达分布的均值为0，标准差为1；之后将归一化的值按照平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。热图最上方样本注释信息条中额外添加挖掘出的Signature模型对每个样本的评估分组信息。
+
+```{r response-signature-mining-heatmap, results = 'asis', fig.width = 8}
+##绘制整体热图，判断是否有分组信息
+
+tmp_object <- exp_group_object
+tmp_object@exp <- exp_group_object@exp[rownames(exp_group_object@exp) %in% response_training@best_model$gene,]
+
+tmp_object@anno <- cbind(tmp_object@anno, 
+                         "Risk_level" = response_total@risk_level_clinic$Risk_level)
+
+tmp_object@heatmap_groups <- append(tmp_object@heatmap_groups, "Risk_level")
+
+
+tmp_object <- epars_plot_setting(tmp_object)
+tmp_object <- epars_heatmap_anno_data(tmp_object)
+top_anno <- tmp_object@plot_setting$heatmap_anno
+
+if(tmp_object@config$heatmap_scale == TRUE){mat <- htmp_scale(tmp_object@exp)}
+
+p <- Heatmap(matrix = mat, show_column_names = T,
+             show_row_names = T,
+             heatmap_legend_param = list(title = "",legend_height = unit(4, "cm")),
+             column_names_rot = -90,
+             row_names_gp =  gpar(fontsize = 7),
+             column_names_gp =  gpar(fontsize = 6),
+             clustering_method_rows = "ward.D2",
+             name = "Scale(exp)",cluster_column_slices = F,
+             cluster_rows = T,
+             clustering_method_columns = "ward.D2",
+             top_annotation = top_anno,
+             col = tmp_object@config$heatmap_color)
+
+
+subchunkify(p, fig_width = 8, fig_height = 8)
+save_pdf(p, paste0(PlotsPath, "Response_Signature_Model_Heatmap.pdf"), width = 8, height = 8)
+
+```
+
+
+<br><br>
+
+### 生存数据的Signature挖掘
+
+```{r survival-Sig-mining-dir, results = 'hide'}
+
+CachePath <- sub('[/][^/]+$', '/9.Signature_Mining_Survival/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/9.Signature_Mining_Survival/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+使用生存数据进行的Signature挖掘相关的数据图表将被保存至 **`r CachePath`**。
+
+```{r survival-Signature-mining-background, results = 'hide', fig.width = 10}
+
+suppressPackageStartupMessages(library(rlang))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(glmnet))
+suppressPackageStartupMessages(library(hash))
+suppressPackageStartupMessages(library(compareC))
+suppressPackageStartupMessages(library(KernSmooth))
+suppressPackageStartupMessages(library(survcomp))
+suppressPackageStartupMessages(library(survivalROC))
+suppressPackageStartupMessages(library(mvtnorm))
+suppressPackageStartupMessages(library(DescTools))
+suppressPackageStartupMessages(library(broom))
+suppressPackageStartupMessages(library(survminer))
+suppressPackageStartupMessages(library(pROC))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(ggsci))
+suppressPackageStartupMessages(library(factoextra))
+suppressPackageStartupMessages(library(patchwork))
+suppressPackageStartupMessages(library(scales))
+
+#读取基因表达量数据，做一些基本处理，得到基因表达和clinic输入数据，输入数据格式：基因表达数据行为基因，列为样本，clinic数据格式：行为样本列为临床信息
+# load(file="./raw_data/test.RData")
+
+data <- exp_group_object
+
+# 在数据对象中建立clinical对象基础，用于下面的分析
+data <- EPARS_clinical_creation(data, label = "survival")
+
+# 随机生成训练样本，训练样本和测试样本保存在@train_sample和@test_sample属性
+data@clinical$survival <- train_validate_sampling(data@clinical$survival,
+												  train_sample_ratio = 0.7, seed = 10086)
+
+# 根据数据对象中的@train_sample和@test_sample生成测试和训练数据对象
+survival_training <- get_sub_data_class(data@clinical$survival, type = "training")
+survival_testing <- get_sub_data_class(data@clinical$survival, type = "testing")
+
+# 对训练集的95分位极值做缩尾处理
+survival_training <- remove_outliners(survival_training)
+
+# 单因素cox分析，计算与预后显著相关的基因
+survival_training <- coxph_single_gene(survival_training, os_colname = "OS", 
+                                       status_colname = "Status", cutoff = 0.05)
+
+# # 如果基因仍然太多，需要进行特征筛选，使用AUC?
+# response_training@univariate_cox_sign <- response_training@univariate_cox_sign[
+#   response_training@univariate_cox_sign[, 2] >= 0.8, ]
+
+
+
+#迭代多次，使用cox+enet方法训练模型，从而找到最稳当且性能最佳的模型
+# 多次迭代来计算最佳的预后相关多因素基因组合，
+# lamdba="average"是指使用lambda min + lambda 1se的均值来获取最佳基因组合，有时可能无结果。
+# lamdba="min"是指使用lambda min来获取最佳基因组合，有时可能过拟合。
+# 结果保存在类的@reshash属性中
+survival_training <- cox_proportional_hazards(survival_training, alpha = 0.8,
+									os_colname= "OS", status_colname = "Status", iteration = 200, 
+									nfolds = 10, lambda = "average")
+
+#提取多次迭代的最佳模型的基因和系数
+survival_training <- get_best_model(survival_training)
+
+# 保存各子数据集的risk得分
+survival_training <- risk_counting(survival_training, survival_training@best_model)
+survival_testing <- risk_counting(survival_testing, survival_training@best_model)
+survival_total <- risk_counting(data@clinical$survival, survival_training@best_model)
+
+
+# pvalue_train <- wilcox.test(Risk_score~Response, 
+#                         data = response_training@risk_score_clinic)$p.value
+# pvalue.test.boxplot <- wilcox.test(Risk_score~Group, data = gep_clinic_class_test@risk_score_clinic)$p.value
+# pvalue.total.boxplot <- wilcox.test(Risk_score~Group, data = gep_clinic_class_total@risk_score_clinic)$p.value
+
+
+```
+
+#### 模型迭代频次
+
+在建立疗效相关预测模型的过程中，会使用交叉验证的多次迭代的方式，通过不断地随机选取数据集中的子集来获得相对带有随机性的模型；交叉验证的方法中，出现频率最高的模型被认为是准确率最高的模型。同时因弹性网络的回归方法包含Lasso回归的部分特质，所以每次迭代中会对基因进行特征筛选。在大量迭代后，出现频率最高的模型所保留的基因个数即为最适合的特征筛选方案。
+<br>下方箱线图呈现了多次迭代中包含不同模型被选择的频率，横坐标代表不同的模型，纵坐标代表该模型在迭代中出现的频率，按出现频率大小从左往右依次排列。请注意，横坐标上每个模型的名称带有每个模型包含的基因个数。包含同样基因个数的模型可能会包含不同的基因队列，因此在名称最后添加后缀作区分使用。在交叉验证过程中，出现频率更高的模型被认为相对稳定性更高，其经历的特征筛选会被保留，且该模型会被用作最佳模型的参考。
+
+```{r survival-Signature-mining-model-freq, results = 'asis', fig.width = 7, fig.height = 6}
+#画模型多次迭代出现的频率分布图
+p <- plot_model_freq(survival_training)
+subchunkify(p, fig_width = 7, fig_height = 6)
+ggsave(paste0(PlotsPath, "Signature_mining_Model_Iteration_Frequency.pdf"),
+	                      plot = p, width = 7, height = 6)
+```
+
+#### 最佳Signature模型
+
+针对上方训练集模型构建的迭代结果，选择了如下方表格所示的基因集合组成的Signature进行了模型的建立。下方表格中，第一列代表了模型中包含的基因，第二列代表了每个基因在模型中对应的权重。
+
+```{r survival-Signature-mining-model-tbl, results = 'asis'}
+tbl <- survival_training@best_model[-1, ]
+colnames(tbl) <- c("Gene in model", "Coefficients")
+
+tbl <- tbl[order(tbl$Coefficients),]
+print(kable(tbl, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'", align = "c"))
+
+cat("<br>")
+
+write.table(tbl, file = paste0(CachePath, "best_model_parameters.txt"),
+							sep = "\t", quote=F)
+```
+<br>
+
+#### C-Index性能评估
+
+一致性指数 (Concordance Index, C-Index) 是评估模型性能的指标之一。在基于生存数据的模型分析时，C-Index可以用来估计模型预测结果与实际数据观察到的结果保持一致的概率。C-Index的区间为0至1，其中1代表模型预测与实际结果完全一致，为完美模型；0.5代表模型类似于随机分类，对个体的类别不做出有意义的预测；0则代表模型完全作出与实际结果相反的预测。
+
+<details>
+<summary> C-Index的计算方法 </summary>
+<div class=details_text>
+
+1) 对所有训练数据集中的个体进行配对，存在X数量的个体，则存在$C_X^2$个个体配对。
+<br>2) 排除不达到观察重点仅保留有效配对后，使用建立的模型对配对中两个个体进行评估。
+<br>3) 与实际生存数据进行对比，若模型预测结果与实际数据相同，则该配对记为一致。
+<br>4) C-Index的值为 总一致的配对数 / 有效配对数。
+</details>
+
+<br>下方用柱状图呈现了训练数据集、测试数据集和总数据集的C-Index性能评估得分。图中横轴和不同的着色代表不同的数据集，纵轴为C-Index得分，得分区间为 0 ~ 1。
+
+```{r survival-Signature-mining-cindex, results = 'asis', fig.width = 4, fig.height = 7}
+# 计算cindex评估结果，cindex值保存在类的@c.index属性
+survival_training <- cindex_eval(survival_training, survival_training@best_model,
+                                 os_colname= "OS", status_colname = "Status")
+survival_testing <- cindex_eval(survival_testing, survival_training@best_model,
+                                 os_colname= "OS", status_colname = "Status")
+survival_total <- cindex_eval(survival_total, survival_training@best_model,
+                                 os_colname= "OS", status_colname = "Status")
+
+# Concordance Index 可视化箱线图
+cindex_vector <- c(survival_training@c.index[1], survival_testing@c.index[1],
+                   survival_total@c.index[1]) 
+dataset <- c("Training","Testing","Total")
+dataset <- factor(dataset, level = dataset)
+df <- data.frame(Dataset = dataset,  C_Index = cindex_vector)
+p <- ggplot(data = df, mapping = aes(x = Dataset, y = C_Index, fill = Dataset)) +
+            theme_bw() + coord_cartesian(ylim = c(0,1)) + 
+            geom_bar(stat = 'identity', width = 0.8, alpha = 0.8) +
+            scale_fill_manual("Dataset", values = desat(c("indianred3", 
+                                          "royalblue3", "khaki3"), 0.7)) +
+            geom_text(aes(label = formatC(C_Index)), vjust = 1.5) +
+            coord_trans(y=exp_trans(exp(2))) + theme(legend.position="none",
+            panel.grid.major.y = element_line(colour = "grey25", linetype = "dashed"),
+            axis.text = element_text(face = "bold", size = 12),
+            axis.title = element_text(face = "bold", size = 12))
+
+subchunkify(p, fig_width = 4, fig_height = 7)
+ggsave(paste0(PlotsPath, "Signature_mining_Concordance_Index.pdf"), plot = p, width = 4, height = 7)
+
+```
+
+
+```{r survival-Signature-roc-background, results = 'hide'}
+
+# 
+# roc_df <- lapply(c(365, 1095, 1825), function (time_cutoff, object = survival_training){
+#   survival_roc <- survivalROC(Stime = object@risk_score_clinic$OS,
+#                       status = object@risk_score_clinic$Status,
+#                       marker = object@risk_score_clinic$Risk_score,
+#                       predict.time = time_cutoff, method="KM")
+#   survival_roc$TP[survival_roc$TP >= 1] <- 1
+#   survival_roc$FP[survival_roc$FP >= 1] <- 1
+#   data.frame(TP = survival_roc[["TP"]], FP = survival_roc[["FP"]], 
+#                        c = survival_roc$cut.values, 
+#                        time = rep(survival_roc$predict.time, length(survival_roc$TP)))
+# })
+# 
+# roc_df <- do.call(rbind, roc_df)
+# roc_df$time <- factor(roc_df$time)
+# pROC <- ggplot(roc_df, aes(x = FP, y = TP, label = c, color = time)) + 
+#   geom_roc(labels = FALSE, stat = "identity") + 
+#   style_roc() +ggsci::scale_color_jco()
+
+
+run_roc <-function(dt, file_path){
+	col <- alpha(desat(c("indianred3", "royalblue3", "yellow4")), 0.7)
+	names(col) <- unique(dt$Time)
+	auc <- c()
+	png(file_path)
+	plot(data.table(a=c(0,1), b= c(0,1)), type = "l", col = "grey",
+	     lty=3, lwd = 2, xlab = "False Positive Rate", ylab = "True Positive Rate")
+	for (i in unique(dt$Time)){
+	       TP <- dt[Time == i, TP]
+	       FP <- dt[Time == i, FP]
+	       #lo <- loess(TP~FP, span = 0.7)
+	       lines(x= c(FP,0), y = c(TP,0),  col = col[i], lwd= 2)
+	       auc[i] <- mean(sample(TP,1000,replace=T) > sample(FP,1000,replace=T))
+	}
+	legend("bottomright", legend = paste(unique(dt$Time), "AUC:", auc), col = col, lwd = 2)
+	invisible(dev.off())
+}
+
+draw_survival_roc <- function(cutoff_list = c(365, 1095, 1825),
+                              object, file_name = "Training",
+                              PlotsPath, CachePath){
+  sur_1 <- survivalROC(Stime = object@risk_score_clinic$OS,
+                        status = object@risk_score_clinic$Status,
+                        marker = object@risk_score_clinic$Risk_score,
+                        predict.time = cutoff_list[1], method = "KM")
+  
+  sur_2 <- survivalROC(Stime = object@risk_score_clinic$OS,
+                        status = object@risk_score_clinic$Status,
+                        marker = object@risk_score_clinic$Risk_score,
+                        predict.time = cutoff_list[2], method = "KM")
+  
+  sur_3 <- survivalROC(Stime = object@risk_score_clinic$OS,
+                        status = object@risk_score_clinic$Status,
+                        marker = object@risk_score_clinic$Risk_score,
+                        predict.time = cutoff_list[3], method = "KM")
+  
+  auc_list <- c(sur_1$AUC, sur_2$AUC, sur_3$AUC)
+  dt1 <- data.table(paste0("Time ", cutoff_list[1]), sur_1$TP, sur_1$FP)
+  dt2 <- data.table(paste0("Time ", cutoff_list[2]), sur_2$TP, sur_2$FP)
+  dt3 <- data.table(paste0("Time ", cutoff_list[3]), sur_3$TP, sur_3$FP)
+  dt <- rbind(dt1,  dt2, dt3)
+  setnames(dt, c("Time", "TP", "FP"))
+  dt$TP[dt$TP > 1] <- 1
+  dt$FP[dt$FP > 1] <- 1
+  write.table(dt, file = paste0(CachePath, "Survival_Signature_Mining_", file_name,
+                                "ROC_data.txt"), sep = "\t", quote=F)
+  run_roc(dt, paste0(PlotsPath, "Survival_Signature_Mining_", file_name, "_ROC.png"))
+  cat("<img src=", paste0(PlotsPath, "Survival_Signature_Mining_", file_name, "_ROC.png"),"
+      width='75%' align = center />")
+}
+
+cat(space)
+
+# 
+# #画ROC曲线，计算AUC，评估模型性能。
+# training_roc <- roc(survival_training@risk_score_clinic$Status, survival_training@risk_score_clinic$Risk_score)
+# testing_roc <- roc(survival_testing@risk_score_clinic$Status, survival_testing@risk_score_clinic$Risk_score)
+# total_roc <- roc(survival_total@risk_score_clinic$Status, survival_total@risk_score_clinic$Risk_score)
+# 
+# p <- ggroc(list(Training = training_roc, Testing = testing_roc,
+#                 Total = total_roc), alpha = 0.5, size = 1.4) +
+#     scale_color_manual("Dataset", values = c("indianred3", "royalblue3", "yellow4")) +
+# 		theme_minimal() + ggtitle("ROC of All Dataset Overlaid") +
+#     annotate("text", x = 0.1, y = 0.14, color = "black", fontface = "bold",
+#              size = 3.5, label = "AUC of:            ") +
+#     annotate("text", x = 0.1, y = 0.11, color = "indianred3", fontface = "bold",
+#              size = 3.5, label = sprintf("Training: %s",
+#              formatC(training_roc$auc, digits = 4, format = "f"))) +
+#     annotate("text", x = 0.1, y = 0.08, color = "royalblue3", fontface = "bold",
+#              size = 3.5, label = sprintf("Testing:  %s",
+#              formatC(testing_roc$auc, digits = 4, format = "f"))) +
+#     annotate("text", x = 0.1, y = 0.05, color = "yellow4", fontface = "bold",
+#              size = 3.5, label = sprintf("Total:      %s",
+#              formatC(total_roc$auc, digits = 4, format = "f"))) +
+# 		geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color="grey", linetype="dashed")+
+# 		theme(plot.title = element_text(face = "bold")) +
+# 		xlab("Specificity (True Negative Rate)") +
+# 		ylab("Sensitivity (True Positive Rate)") + coord_fixed()
+
+```
+
+#### ROC曲线和AUC性能评估 {.tabset .tabset-fade}
+
+受试者工作特征 (Receiver Operating Characteristic, <span class="highlight"> ROC</span>) 是评估Signature模型性能的指标。ROC曲线可以呈现的是一个模型中分类阈值不断调整的过程中模型分类准确性的分布情况。ROC曲线中两个关键指标为<span class="highlight"> 灵敏度(Sensitivity) </span>和<span class="highlight"> 特异度(Specificity) </span>。
+
+<details>
+<summary> 灵敏度和特异度的介绍</summary>
+<div class=details_text>
+<span class="highlight"> 灵敏度(Sensitivity) </span>也可被称为真阳性率(True Positive Rate, TPR)或召回率(Recall)，指的是实际信息确实为阳性的个体中，被判断为阳性个体的比例。灵敏度的范围在0 - 1之间。
+<br><span class="highlight"> 特异度(Specificity) </span>也可被称为真阴性率(True Negative Rate, TNR) 或 1 - 假阳性率 (False Positive Rate, FPR)，指的是是实际信息确实为阴性的个体中，被判断为阴性个体的比例。特异度的范围也在0 - 1之间。
+</details>
+
+<br>ROC曲线则根据建立的模型，给出所有可能的分类阈值的情况下模型的表现情况。如下方的ROC曲线图中，横坐标代表特异度，纵坐标代表灵敏度。Signature模型在不同分类阈值时表现出的特异度和灵敏度组成二维坐标轴，则可以在下方的二维空间中画出模型在不同分类阈值下的性能情况的数个数据点，所有的数据点相连接即形成了ROC曲线。
+<br><span class="highlight"> Area Under Curve (AUC) </span> 是图中ROC曲线下与图像边界围合构成的面积，同一个模型不论分类阈值如何变化其AUC数值固定。因为横纵坐标轴范围均为0 - 1，AUC的面积也会在0 - 1之间浮动。AUC越大时模型被认为效率越好。
+
+<details>
+<summary> ROC和AUC与模型性能的对应关系</summary>
+<div class=details_text>
+ROC图中最左上角的点代表了灵敏度和特异度均为1的情况，此时AUC的面积为1；该情况描述的即为完美分类器，永远会按照真实的情况对个体进行分组。
+<br>ROC图中中间的灰色对角线左上侧的空间对应的AUC处于0.5 - 1之间，此时模型更接近真实世界中的预测模型，具有一定的预测功能但是存在分类错误的可能性。
+<br>ROC图中中间的灰色对角线对应的AUC为0.5，此时模型可以类似于随机分类，对个体的类别不做出有意义的预测。
+<br>ROC图中灰色对角线右下侧的空间对应的AUC小于0.5，此时模型比随机预测更差，直至右下角的点时，模型完全给出相反的分类结果。
+</details>
+
+<br>下方用标签页分别呈现了模型训练用数据集、模型测试用数据集、总数据集上，不同时间长度范围内，生存预测模型的ROC曲线分布。每张图中用不同着色代表不同时间长度下生存模型的预测性能，图中右下角标注了不同时间长度下模型ROC曲线对应的AUC大小信息。
+
+```{r survival-Signature-mining-roc, results = 'asis', fig.width = 7, fig.height = 6.5}
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+# Training Dataset
+title_string <- "Training"
+cat(sprintf(template, title_string))
+draw_survival_roc(cutoff_list = c(365, 730, 1095), object = survival_training, file_name = title_string, PlotsPath = PlotsPath, CachePath = CachePath)
+cat(space)
+
+# Testing Dataset
+title_string <- "Testing"
+cat(sprintf(template, title_string))
+draw_survival_roc(cutoff_list = c(365, 730, 1095), object = survival_testing, file_name = title_string, PlotsPath = PlotsPath, CachePath = CachePath)
+cat(space)
+
+# Total Dataset
+title_string <- "Total"
+cat(sprintf(template, title_string))
+draw_survival_roc(cutoff_list = c(365, 730, 1095), object = survival_total, file_name = title_string, PlotsPath = PlotsPath, CachePath = CachePath)
+cat(space)
+
+```
+<br>
+
+
+#### COX回归分析  {.tabset .tabset-fade}
+
+COX回归分析，又称“比例风险回归模型(Proportional Hazards Model，简称Cox模型)”，是由英国统计学家D.R.Cox(1972)年提出的一种半参数回归模型，经常用于用于研究某些因素对生存期的影响。下方标签页展示了不同模型预测标签对个体分组后，各组内最佳模型内基因的风险比（Hazard Ratio）及95%置信区间。通常来说，HR值大于1，则该因素是高风险因素，HR值小于1，则该因素是低风险因素。
+图中纵轴代表无效线，每一条平行于横轴的线段代表一个基因，线段的长度代表95%置信区间。图中上图代表最佳模型中的各个基因的HR，下图展示了该Signature的HR。
+
+```{r cox-forestplot, results = 'asis', fig.width = 9, fig.height = 9}
+template <- "##### %s {.unlisted .unnumbered}
+"
+#数据处理
+library(forestplot)
+library(ggplotify)
+library(patchwork)
+cox_dtatp <- function(object,bestGene){
+  cox_object <- object@exp[rownames(object@exp) %in% bestGene,]
+  cox_exp <- t(cox_object)
+  clinic_score <- object@risk_score_clinic
+  signature_risk_score <- clinic_score %>% transmute(
+    BesSignature=Risk_score,
+  )
+  cox_ann <- object@anno %>% transmute(
+    OS,
+    Status,
+  )
+  cox_ann <- cox_ann[colnames(cox_object),]
+  cox_data <- cbind(cox_ann,cox_exp,signature_risk_score)
+  return(cox_data)
+}
+
+# cox_froestplot <- function(cox_data){
+# result <- data.frame()
+# for(i in colnames(cox_data[,3:ncol(cox_data)])){
+#   cox_model <- coxph(Surv(OS, Status) ~ get(i), data =  cox_data)
+#   coxSummary = summary(cox_model)
+#   result=rbind(result,
+#                cbind(id=i,
+#                      HR=coxSummary$conf.int[,"exp(coef)"],
+#                      HR.95L=coxSummary$conf.int[,"lower .95"],
+#                      HR.95H=coxSummary$conf.int[,"upper .95"],
+#                      pvalue=coxSummary$coefficients[,"Pr(>|z|)"]))
+# }
+# result[,2:5] <-apply(result[,2:5],2,as.numeric)
+# 
+# result <- as.data.frame(result)
+# result$pvalue <- ifelse(
+#   result$pvalue < 0.001, "<0.001 ***",
+#   ifelse(
+#     result$pvalue < 0.01,"<0.01  **",
+#     ifelse(
+#       result$pvalue < 0.05,
+#       paste(round(result$pvalue, 3), " *"),
+#       round(result$pvalue, 3)
+#     )
+#   )
+# )
+# 
+# result <- cbind(result,hr=result$HR)
+# result[2:4] <- log10(result[2:4])
+# result$HR <- round(result$HR,digits = 3)
+# result$hr <- round(result$hr,digits = 3)
+# a <- c("Gene","HR",NA,NA,"P","HR")
+# result <- rbind(a,result)
+# for(i in 3:4) {
+#   result[, i] = as.numeric(result[, i])
+# }
+# #######画图
+# library(forestplot)
+# p <- forestplot(
+#   result[,c(1,6,5)],
+#   labeltext=colnames(result),
+#   mean = result$HR,
+#   lower = result$HR.95L,
+#   upper = result$HR.95H,
+#   zero = 0,
+#   boxsize = 0.4,
+#   col = fpColors(box = '#1075BB', lines = 'black', zero = 'grey'),
+#   lty.ci = "solid",
+#   graph.pos = 2,
+#   
+#   hrzl_lines = gpar(col = "#444444"),
+#   #
+#   # new_page = TRUE,
+#   is.summary =c(T,rep(FALSE,13)),
+#   # hrzl_lines = list(
+#   #   "1" = gpar(lty=1),
+#   #   "2" = gpar(lty=1),
+#   #   "16"= gpar(lty=1)),
+#   # colgap = unit(5, 'mm')
+# )
+# pdf(file =outpath ,onefile = F)
+# plot(p)
+# dev.off()
+# #ggsave(paste0(outpath, width = 8, height = 8),plot = p)
+# return(p)
+# print(p)
+# }cox_data <- cox_dtatp(survival_training,bestGene)
+plot1 <- function(cox_data1){
+  result <- data.frame()
+  for(i in colnames(cox_data1[,3:ncol(cox_data1)])){
+    cox_model <- coxph(Surv(OS, Status) ~ get(i), data =  cox_data1)
+    coxSummary = summary(cox_model)
+    result=rbind(result,
+                 cbind(id=i,
+                       HR=coxSummary$conf.int[,"exp(coef)"],
+                       HR.95L=coxSummary$conf.int[,"lower .95"],
+                       HR.95H=coxSummary$conf.int[,"upper .95"],
+                       pvalue=coxSummary$coefficients[,"Pr(>|z|)"]))
+  }
+  result[,2:5] <-apply(result[,2:5],2,as.numeric)
+  result <- as.data.frame(result)
+  result$pvalue <- ifelse(
+    result$pvalue < 0.001, "<0.001 ***",
+    ifelse(
+      result$pvalue < 0.01,"<0.01  **",
+      ifelse(
+        result$pvalue < 0.05,
+        paste(round(result$pvalue, 3), " *"),
+        round(result$pvalue, 3)
+      )
+    )
+  )
+  
+  #result <- cbind(result,hr=result$HR)
+  #result[2:4] <- log10(result[2:4])
+  result$HR <- round(result$HR,digits = 3)
+  #result$hr <- round(result$hr,digits = 3)
+  a <- c("Gene","HR",NA,NA,"P")
+  result <- rbind(a,result)
+  for(i in 3:4) {
+    result[, i] = as.numeric(result[, i])
+  }
+  p1 <- forestplot(
+    result[,c(1,2,5)],
+    labeltext=colnames(result),
+    mean = result$HR,
+    lower = result$HR.95L,
+    upper = result$HR.95H,
+    zero = 1,
+    boxsize = 0.4,
+    col = fpColors(box = '#1075BB', lines = 'black', zero = 'grey'),
+    lty.ci = "solid",
+    graph.pos = 2,
+    
+    hrzl_lines = gpar(col = "#444444"),
+    #
+    # new_page = TRUE,
+    is.summary =c(T,rep(FALSE,13)),
+    # hrzl_lines = list(
+    #   "1" = gpar(lty=1),
+    #   "2" = gpar(lty=1),
+    #   "16"= gpar(lty=1)),
+    # colgap = unit(5, 'mm')
+  )
+  return(p1)
+}
+plot2 <- function(cox_data2){cox_model <- coxph(Surv(OS, Status) ~ ., data =  cox_data2)
+coxSummary = summary(cox_model)
+result=cbind(
+  HR=coxSummary$conf.int[,"exp(coef)"],
+  HR.95L=coxSummary$conf.int[,"lower .95"],
+  HR.95H=coxSummary$conf.int[,"upper .95"],
+  pvalue=coxSummary$coefficients[,"Pr(>|z|)"])
+
+result <- as.data.frame(result)
+result$pvalue <- as.numeric(result$pvalue) 
+result$pvalue <- ifelse(
+  result$pvalue < 0.001, "<0.001 ***",
+  ifelse(
+    result$pvalue < 0.01,"<0.01  **",
+    ifelse(
+      result$pvalue < 0.05,
+      paste(round(result$pvalue, 3), " *"),
+      round(result$pvalue, 3)
+    )
+  )
+)
+
+result <- cbind(name=c("Signature"),result)
+result$HR <- round(result$HR,digits = 3)
+a <- c("item","HR",NA,NA,"P")
+result <- rbind(a,result)
+#result <- result[-1,]
+for(i in 3:4) {
+  result[, i] = as.numeric(result[, i])
+}
+p2 <- forestplot(
+  result[,c(1,2,5)],
+  labeltext=colnames(result),
+  mean = result$HR,
+  lower = result$HR.95L,
+  upper = result$HR.95H,
+  zero = 1,
+  boxsize = 0.1,
+  col = fpColors(box = '#1075BB', lines = 'black', zero = 'grey'),
+  lty.ci = "solid",
+  graph.pos = 2,
+  hrzl_lines = gpar(col = "#444444"),
+  lineheight= unit(20,"mm"),
+  #graphwidth=unit(55,"mm"),  ##图的大小
+  #
+  # new_page = TRUE,
+  is.summary =c(T,rep(FALSE,2000)),
+  # hrzl_lines = list(
+  #   "1" = gpar(lty=1),
+  #   "2" = gpar(lty=1),
+  #   "16"= gpar(lty=1)),
+  # colgap = unit(5, 'mm')
+)
+return(p2)
+}
+plot_bind <- function(cox_data1,cox_data2){
+p1 <- plot1(cox_data1 = cox_data1)
+p2 <- plot2(cox_data2 = cox_data2)
+p1 <- grid2grob(print(p1))
+p2 <- grid2grob(print(p2))
+p3 <- wrap_elements(p1) / wrap_elements(p2) +
+  plot_layout( heights = (c(3, 1)))
+print(p3)
+pdf(file =outpath ,onefile = F)
+plot(p3)
+invisible(dev.off())
+}
+bestGene <- survival_training@best_model$gene
+cat(sprintf(template, "Training Dataset"))
+outpath <- paste0(CachePath, "Training_bestsignature_forestplot_Plot.pdf")
+cox_data <- cox_dtatp(survival_training,bestGene)
+cox_data1 <- dplyr::select(cox_data,-c("BesSignature"))
+cox_data2 <- dplyr::select(cox_data,1,2,c("BesSignature"))
+plot_bind(cox_data1,cox_data2)
+cat(space)
+cat(sprintf(template, "Testing Dataset"))
+outpath <- paste0(CachePath, "Testing_bestsignature_forestplot_Plot.pdf")
+cox_data <- cox_dtatp(survival_testing,bestGene)
+#cox_data1 <- cox_data[,-c("BesSignature")]
+cox_data1 <- dplyr::select(cox_data,-c("BesSignature"))
+#cox_data2 <- cox_data[,c(1,2,15)]
+cox_data2 <- dplyr::select(cox_data,1,2,c("BesSignature"))
+plot_bind(cox_data1,cox_data2)
+cat(space)
+cat(sprintf(template, "Total Dataset"))
+outpath <- paste0(CachePath, "Total_bestsignature_forestplot_Plot.pdf")
+cox_data <- cox_dtatp(survival_total,bestGene)
+cox_data1 <- dplyr::select(cox_data,-c("BesSignature"))
+cox_data2 <- dplyr::select(cox_data,1,2,c("BesSignature"))
+plot_bind(cox_data1,cox_data2)
+cat(space)
+
+# cat(sprintf(template, "Testing Dataset"))
+# outpath <- paste0(CachePath, "testing_bestsignature_forestplot_Plot.pdf")
+# cox_data <- cox_dtatp(survival_testing,bestGene)
+# cox_froestplot(cox_data)
+# cat(space)
+# cat(sprintf(template, "Total Dataset"))
+# outpath <- paste0(CachePath, "total_bestsignature_forestplot_Plot.pdf")
+# cox_data <- cox_dtatp(survival_total,bestGene)
+# cox_froestplot(cox_data)
+# cat(space)
+```
+<br>
+
+#### {.unlisted .unnumbered}
+
+#### K-M 生存分析 {.tabset .tabset-fade}
+
+Kaplan-Meier (K-M) ⽣存曲线是临床研究中对于生存相关类型数据进行可视化展示和分析的重要方法之一。K-M方法本身又可称乘积极限法，每一个时间点的累积生存概率为时间点前所有生存慨率的乘积。K-M曲线展示的是在具有一定时间跨度的临床研究中，所有个体生存率随时间变化的特征。图中横轴代表时间，纵轴代表总生存率。曲线在某个横轴位置的下降意味着该时间节点下某些个体的生存状态发生了改变。下方按标签页展示了不同数据分组下按照模型预测标签对个体分组后每组个体的K-M生存曲线；
+每张图中，使用挖掘出的模型可以对个体进行风险评估，按评估出的风险标签对个体进行分组，并使用不同着色的K-M曲线来代表不同组别个体的生存分布。图中P值为两个组别差异的显著性；图右上角的附表中包含了生存时间的中位数(mOS/mPFS)即半数生存期，指恰好有一半个体生存的时间节点；两个组别发生生存状态改变的风险比(HR)，和95%的置信区间(CI);图下方的附表体现了部分时间节点下每个分组中剩余的个体数量。
+
+```{r survival-Signature-mining-score-distribution, results = 'asis', fig.width = 9, fig.height = 7}
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+survival_plot=function (data = dt, group = "TMB_level", stat = "stat", time = "PFS", 
+                        add_hr_table = T, outfigurefile = T, out_dir = "./test.pdf", 
+                        group_order = "F", main = "") 
+{
+  require(survminer)
+  require(survival)
+  require(grid)
+  dt <- as.data.frame(data)
+  if (length(setdiff(c(group, stat, time), colnames(dt))) != 
+      0) {
+    stop(paste("Please check ", setdiff(c(group, stat, time), 
+                                        colnames(dt)), sep = ""))
+  }
+  colnames(dt)[colnames(dt) == group] <- "Group"
+  colnames(dt)[colnames(dt) == stat] <- "stat"
+  groupchar <- nchar(paste(unique(dt$Group), collapse = ""), 
+                     type = "width")
+  if (group_order == "NA") {
+    dt <- dt[unique(c(grep("high", as.character(dt$Group)), 
+                      grep("low", as.character(dt$Group)))), ]
+  }else if (group_order != "F") {
+    lev <- strsplit(group_order, split = ",")[[1]]
+    if (length(setdiff(lev, unique(as.character(dt$Group)))) != 
+        0) {
+      stop("group_order should corresponding to the group column!")
+    }
+    dt$Group <- factor(as.character(dt$Group), lev)
+    dt <- dt[order(dt$Group), ]
+  }
+  if (outfigurefile) {
+    pdf(out_dir, width = 3 + (3.5 + 2/13 * groupchar), height = 7)
+  }
+  if (time == "PFS") {
+    fit <- surv_fit(Surv(PFS, stat) ~ Group, data = dt)
+  }else if (time == "OS") {
+    fit <- surv_fit(Surv(OS, stat) ~ Group, data = dt)
+  }else {
+    stop("FS should be either PFS or OS")
+  }
+  grid.newpage()
+  draw_surv(dt, fit, add_hr_table = add_hr_table, time = time, 
+            title = main,outpath,outfigurefile)
+  if (outfigurefile) {
+    invisible(dev.off())
+  }
+}
+
+
+draw_surv=function (dt, fit, add_hr_table = T, time, title,outpath,outfigurefile) {
+  ylabel <- paste("Survival probability (", time, ")", sep = "")
+  print(ggsurvplot(fit, data = dt, pval = TRUE, risk.table = T, 
+                   palette = "lancet", font.main = 16, font.x = 14, font.y = 14, 
+                   font.tickslab = 12, font.legend = 14, ylab = ylabel, 
+                   ggtheme = theme_bw() + theme(panel.grid = element_blank(), 
+                                                panel.border = element_blank(), axis.line = element_line(size = 1, 
+                                                                                                         colour = "black")) + theme(plot.title = element_text(hjust = 0.5, 
+                                                                                                                                                              face = "bold")), title = title), newpage = F)
+  if (add_hr_table == T) {
+    hr <- EPARS:::get_hr(dt, time)
+    sum_table <- summary(fit)$table[, 7]
+    sum_table[is.na(sum_table)] <- "NR"
+    if (time == "PFS") {
+      mPFS <- sort(sum_table)
+      hr_table <- rbind(mPFS, `HR (95% CI)` = hr)
+    }else if (time == "OS") {
+      mOS <- sort(sum_table)
+      hr_table <- rbind(mOS, `HR (95% CI)` = hr)
+    }
+    if(outfigurefile==F)print(kable(hr_table, format = 'html', row.names = T,  table.attr = "class=\"epars-tbl\""))
+    write.csv(hr_table,stringr::str_replace(outpath,"\\.pdf","\\.csv"),)
+
+  }
+}
+
+km_plot=function(object, outpath = "./test.pdf", exportfile = T){
+  object@risk_level_clinic$Risk_level <-  factor(object@risk_level_clinic$Risk_level,
+                                                 levels =c("low_risk","high_risk"))
+  
+  colnames(object@risk_level_clinic)[colnames(object@risk_level_clinic)=="Group"] <- "Groups"
+  colnames(object@risk_level_clinic)[colnames(object@risk_level_clinic)=="stat"] <- "ord_stat"
+
+    survival_plot(data = object@risk_level_clinic, group = "Risk_level", 
+        stat = "Status", time = "OS", out_dir = outpath, group_order = "F", 
+        outfigurefile = exportfile,  add_hr_table = T)
+}
+
+cat(sprintf(template, "Training Dataset"))
+outpath <- paste0(CachePath, "Training_Dataset_KM_Plot.pdf")
+km_plot(survival_training, outpath = outpath, exportfile = F)
+km_plot(survival_training, outpath = outpath)
+cat(space)
+
+# Testing Dataset
+cat(sprintf(template, "Testing Dataset"))
+outpath <- paste0(CachePath, "Testing_Dataset_KM_Plot.pdf")
+km_plot(survival_testing, outpath = outpath, exportfile = F)
+km_plot(survival_testing, outpath = outpath)
+cat(space)
+
+# Total Dataset
+cat(sprintf(template, "Total Dataset"))
+outpath <- paste0(CachePath, "Total_Dataset_KM_Plot.pdf")
+km_plot(survival_total, outpath = outpath, exportfile = F)
+km_plot(survival_total, outpath = outpath)
+cat(space)
+
+```
+
+<br>
+
+#### {.unlisted .unnumbered}
+
+
+#### 模型基因热图
+
+对挖掘出的Signature模型中包含的所有基因的表达水平使用无监督聚类热图展示。热图中每一列代表一个个体，每一行代表模型中包含的一个基因，对个体和基因均使用Ward.D2的无监督层次聚类，相似表达水平的个体或基因在热图中会更加接近。对每个基因进行Z-Score的归一化处理，使得基因在所有个体中的表达分布的均值为0，标准差为1；之后将归一化的值按照平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。热图最上方样本注释信息条中额外添加挖掘出的Signature模型对每个样本的评估分组信息。
+
+
+```{r survival-signature-mining-heatmap, results = 'asis', fig.width = 8}
+##绘制整体热图，判断是否有分组信息
+
+tmp_object <- exp_group_object
+tmp_object@exp <- exp_group_object@exp[rownames(exp_group_object@exp) %in% survival_training@best_model$gene,]
+
+tmp_object@anno <- cbind(tmp_object@anno, 
+                         "Risk_level" = survival_total@risk_level_clinic$Risk_level)
+
+tmp_object@heatmap_groups <- append(tmp_object@heatmap_groups, "Risk_level")
+
+
+tmp_object <- epars_plot_setting(tmp_object)
+tmp_object <- epars_heatmap_anno_data(tmp_object)
+top_anno <- tmp_object@plot_setting$heatmap_anno
+
+if(tmp_object@config$heatmap_scale == TRUE){mat <- htmp_scale(tmp_object@exp)}
+
+p <- Heatmap(matrix = mat, show_column_names = T,
+             show_row_names = T,
+             heatmap_legend_param = list(title = "",legend_height = unit(4, "cm")),
+             column_names_rot = -90,
+             row_names_gp =  gpar(fontsize = 7),
+             column_names_gp =  gpar(fontsize = 6),
+             clustering_method_rows = "ward.D2",
+             name = "Scale(exp)",cluster_column_slices = F,
+             cluster_rows = T,
+             clustering_method_columns = "ward.D2",
+             top_annotation = top_anno,
+             col = tmp_object@config$heatmap_color)
+
+
+subchunkify(p, fig_width = 8, fig_height = 8)
+save_pdf(p, paste0(PlotsPath, "Survival_Signature_Model_Heatmap.pdf"), width = 8, height = 8)
+
+```
+
+
+#### 最佳模型中基因的差异表达森林图  {.tabset .tabset-fade}
+
+对挖掘出的Signature模型中包含的所有基因的表达水平按照风险等级及生存信息分组，利用森林图展示不同分组中基因表达量均值和95%置信区间。纵轴代表无效线，每一条平行于横轴的线段代表一个基因，线段的长度代表95%置信区间。图例显示分组详细信息，当图中横线线段和无效线相交时，提示两组之间无统计学显著性差异。可通过该图观察不同基因在不同组别中表达情况。
+
+```{r best_signature-diffexp_forestplot, results = 'asis', fig.width = 10, fig.height = 10, warning=FALSE,message=FALSE,echo=FALSE}
+template <- "##### %s {.unlisted .unnumbered}
+"
+title_template <- "##### 差异分组: %s {.tabset .tabset-fade}
+"
+
+tmp_object <- exp_group_object
+tmp_object@exp <- exp_group_object@exp[rownames(exp_group_object@exp) %in% survival_training@best_model$gene,]
+
+tmp_object@anno <- cbind(tmp_object@anno, 
+                         "Risk_level" = survival_total@risk_level_clinic$Risk_level)
+grpoup <- c("Risk_level","Status" )
+
+
+################################
+##############################
+# 
+# 注意!!!!!!!!!!!!!这里可能会根据项目的不同有不同的修改!!!!!!
+# !!!!!!!!!!如有问题联系郭昊与东彬!!!!!!!!!
+#   后期有时间有更多的数据之后做泛化处理!!!!!!!
+#   最近是来不及了,20220924留
+
+#################################
+tmp_object@anno$Status <- gsub("1","Dead",tmp_object@anno[["Status"]])
+tmp_object@anno$Status <- gsub("0","Alive",tmp_object@anno[["Status"]])
+# tmp_object@anno[["Status"]][tmp_object@anno[["Status"]]=="0"] <- "ALive"
+# tmp_object@anno[["Status"]][tmp_object@anno[["Status"]]=="1"] <- "Dead"
+cat(space)
+for (i in grpoup) {
+  cat(space)
+  if(length(unique(tmp_object@anno[[i]])) == 2){
+ 
+      Immune_celltype <- as.data.frame(t(tmp_object@exp))
+      Immune_celltype_df_ann = cbind(Immune_celltype,ann = tmp_object@anno[[i]] )
+      #Immune_celltype_df_ann <- Immune_celltype_df_ann[colnames(Immune_celltype_df_ann == g ),]
+    var1 = data.frame(unique(Immune_celltype_df_ann$ann))[1,]#unique(Immune_celltype_df_ann$ann)  提取变量种类,
+    var2 = data.frame(unique(Immune_celltype_df_ann$ann))[2,]
+    var1_data <- subset(Immune_celltype_df_ann,ann == var1)  #提取变量1(var1)组变量2(var2)组
+    var1_data$ann = NULL #删除注释列。
+    var2_data <- subset(Immune_celltype_df_ann,ann == var2)
+    var2_data$ann = NULL
+    mean_var2_data <- data.frame(colMeans(var2_data))#SD组求平均
+    var1_data <- t(var1_data)#转置，配合mean_sd_data数据格式。
+    dat_logFC <- var1_data-mean_var2_data[,1]#var1组减去var2组的均值，因为这里的var1和var2都是经过log2之后的数值，因此，log2（var1/var2_mean）等同于
+    #log2var1-log2var2，mean_var2_data[,1]为第一列，**应该可以改个写法。**
+    dat_logFC <- apply(dat_logFC,1,t.test)#对结果进行t检验
+    #dat_test <- dat_unand#连接俩模块，**后面再改**
+    mean <- lapply(dat_logFC,\(x){x[["estimate"]]})%>%unlist%>% data.frame()#提取均值
+    lcl95 <- lapply(dat_logFC,\(x){x[["conf.int"]][[1]]})%>%unlist%>% as.data.frame()#提取95%置信区间的下限
+    ucl95 <- lapply(dat_logFC,\(x){x[["conf.int"]][[2]]})%>%unlist%>% as.data.frame()#提取95%置信区间的上限
+    p_value <- lapply(dat_logFC,\(x){x[["p.value"]]})%>%unlist%>% as.data.frame()#提取p值，但是在后面的图里没有展示
+    merge_data <- cbind(mean$.,lcl95,ucl95,p_value)#合并，mean$. 是因为如果直接使用mean行名会变得复杂，好像只有mean这个元素的行名与其他不同。
+    merge_data <- cbind(row.names(merge_data),merge_data)#删除行名，把行名当做列
+    row.names(merge_data) <- NULL
+    colnames(merge_data) <- c("name","logFC","lcl95","ucl95","p_value") #重命名列名。 这里的logFC 就是logFC的均值。
+       cat(sprintf(template, paste0(i)))
+    #绘制森林图
+    forest_data <- merge_data %>%   #提取数据列
+      transmute(
+        name,
+        mean = logFC,
+        upper = ucl95,
+        lower = lcl95
+      )
+    group <- ifelse(
+      forest_data$lower > 0, "up",
+      ifelse(
+        forest_data$upper < 0, "down",
+        "not"
+      )
+
+    )
+    forest_data <- data.frame(forest_data,Significance=group) #合并
+
+    #绘制森林图
+    cols <- c( "down" = "black", "not" = "white","up" = "black")
+    sp <- c("down" = 25, "not" = 21,"up" = 24)
+    p <- ggplot(forest_data, aes(mean,
+                                 y = reorder(name,mean),
+                                 #col=Significance,
+                                 shape = Significance,
+                                 fill = Significance
+    )
+    ) # 不同形状shape= Factor
+    forest_groupinfo <- paste0("Down from ",var1,"/",var2," <--- Log2 FC ---> " ,"Up from ",var1,"/",var2)
+#cat(sprintf(template, paste0(i)))
+cat(space)
+ #cat(sprintf(template, paste0(i)))
+ cat(space)
+p= p +
+      geom_errorbarh(aes(xmax =upper, xmin = lower),
+                     height = 0.2,
+                     colour="#4E84CC",
+                     size = 1.2
+      ) +
+      geom_point(size=2,
+                 color = "#4E84CC",
+                 stroke = 1.5
+                 )+
+      geom_vline(aes(xintercept = 0),
+                 linetype = "dashed",
+                 size = 1.2
+                 ) +
+      xlab(forest_groupinfo) +
+      ylab(' ')+
+      #scale_colour_manual(values = cols)+
+      scale_shape_manual(values = sp)+
+      scale_fill_manual(values = cols)+
+      #scale_fill_discrete(guide = "none")
+      #theme(legend.position = 'none')
+      ggtitle(paste0("Results for ",i),paste0("(",var1,") versus Baseline (",var2,")"))+
+      theme(legend.position="bottom",#左边left,右边 right, 底部bottom
+            panel.border = element_rect(linetype = "solid", fill = NA),#设置边框线式样
+            panel.background = element_blank(),#去掉背景的灰底
+            legend.key  = element_blank(),#去掉图例的灰底
+            #panel.grid.major.y= element_line(size = 3,color = "grey"),
+            #panel.grid.minor.y= element_blank(),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            plot.title = element_text(hjust = 0.5),
+            plot.subtitle = element_text(hjust = 0.5)
+      )
+
+    print(p)
+
+    invisible(ggsave(paste0(PlotsPath,"/SE_foresetplot_",i, ".pdf"),p))
+    write.csv(merge_data,file =(paste0(PlotsPath,"Immune_CellType_DE_foresetplot_data_",i,".csv")),row.names = F)
+}
+  }
+  #cat(paste0("#### {.unlisted .unnumbered}"))
+	cat(space)
+```
+<br>
+
+#### {.unlisted .unnumbered}
+

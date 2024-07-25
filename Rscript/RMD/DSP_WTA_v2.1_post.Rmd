@@ -1,0 +1,508 @@
+---
+# title: "DSP WTA 标准分析报告"
+# author: "Hu Tianmu (Timo); Guo Hao"
+# date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    number_sections: true
+    theme: paper
+    smooth_scroll: false
+    keep_md: false
+    highlight: tango
+    self_contained: true
+    dev: "png"
+    df_print: paged
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+params:
+  json_path: "./raw_data/list_param.json"
+  extdata_path: "./resource/extdata/"
+  resource_path: "./resource/"
+bibliography: resource/ref.bib
+csl: resource/ieee.csl
+link-citations: true
+---
+
+```{r pre-setup, results = 'hide', cache.lazy=TRUE,echo = FALSE, warning = FALSE, message = FALSE}
+# ##使用广义线性回归分析
+# glm=F
+# setwd((dirname(rstudioapi::getActiveDocumentContext()$path)))
+LOQ_Filter=5  #5%
+glm_diff=F #是否使用广义线性回归算法
+#Patient <- NA
+thresholdValues <- function(x, thresh=0.5) {
+  if (thresh <= 0) {
+    warning("Parameter, thresh, cannot be set to less than or equal to 0. 
+              The default threshold of 0.5 was used instead.")
+    thresh <- 0.5
+  }
+  if (min(x, na.rm = TRUE) < thresh) {
+    x <- x[!is.na(x)] + thresh
+  }
+  return(x)
+}
+ngeoMean <- function(x=qs, thresh=1) {
+  x <- thresholdValues(x, thresh=thresh)
+  return(EnvStats::geoMean(x, na.rm = TRUE))
+}
+rescale.AsIs <- function(x, ...){
+dropAsis <- function(x){
+cls <- class(x)
+structure(x, class = setdiff(cls, "AsIs"))
+}
+scales:::rescale(dropAsis(x), ...)
+}
+# !!! 请注意，若在Rstudio交互界面进行手动分析的话，请运行下方命令设置工作目录
+getwd_dir=getwd()
+#knitr::opts_knit$set(root.dir = dirname(rstudioapi::getActiveDocumentContext()$path))
+# JSON path setup, which will be loaded as list_param
+json_path <- params$json_path
+# Resource_info_Path setup, which will be extdata folder
+Resource_info_Path <- params$extdata_path
+# resource_path
+resource_path <- params$resource_path
+
+# function to add a trailing "/" if not available in directory input
+ensure_trailing_slash <- function(string){
+	if(!endsWith(string, "/")){ string <- paste0(string, "/")}
+	return(string)
+}
+
+# source the environment, using .libPath()
+
+source(paste0(ensure_trailing_slash(resource_path), ".Rprofile"))
+
+# readin json file to list_param
+suppressPackageStartupMessages(library(jsonlite))
+suppressPackageStartupMessages(library(stringr))
+list_param <- jsonlite::read_json(path = json_path, simplifyVector = T)
+
+#选择种属,hsa==人,mm==鼠
+org <- list_param$org
+#选择产品线
+titl_name= "全转录组"
+# readin report version from json, 质控版，标准版或高级版
+report_version <- list_param$report_version
+if (str_detect(report_version, regex('QC', ignore_case = T)) ){
+  QC_eval <- T; Standard_eval <- F; Advanced_eval <- F
+  Title_Report_Version_Name <- paste0("数字空间靶向",titl_name,"学质控版分析报告")
+} else if (str_detect(report_version, regex('Standard', ignore_case = T))){
+  QC_eval <- T; Standard_eval <- T; Advanced_eval <- F
+  Title_Report_Version_Name <- paste0("数字空间靶向",titl_name,"学标准版分析报告")
+} else if (str_detect(report_version, regex('Advanced', ignore_case = T))){
+  QC_eval <- T; Standard_eval <- T; Advanced_eval <- T
+  Title_Report_Version_Name <- paste0("数字空间靶向",titl_name,"学高级版分析报告")
+}
+# readin params from json
+qc_groups <- list_param$qc_groups
+
+# readin params from json
+heatmap_groups <- list_param$heatmap_groups
+
+# readin params from json
+deg_groups <- list_param$deg_groups
+
+# shown on the front page, need to be modified with client name
+Title_Client_Name <- list_param$title_client_name
+
+# 报告对应公司主体
+Title_Belonged_Company <- list_param$title_belonged_company
+
+# shown on the front page, need to be modified with a report registration number
+Title_Report_Number <- paste0(format(Sys.time(), '%Y%m%d'), ":", stringr::str_pad(floor(runif(1) * 10000), 4, pad = "0"))
+
+# Differential expression section parameters
+fdr_cutoff <- 0.05
+lfc_cutoff <- 1
+volcano_num_label_each <- 10
+
+# if heatmap needed to be scaled, default is TRUE
+heatmap_scale <- TRUE
+
+# 是否保存rds数据
+save_rds_TF <- T
+
+# 实验操作人
+sig_operator <- list_param$operator
+# 数据分析人
+sig_analyst <- list_param$analyst
+# 报告核对人
+sig_reviewer <- list_param$reviewer
+# 报告审批人
+sig_approver <- list_param$approver
+# 落款日期
+sig_date <- list_param$sig_date
+
+```
+
+```{r package-setup, results = 'hide', echo = FALSE, warning = FALSE, message = FALSE,cache=FALSE}
+
+suppressPackageStartupMessages(library(EPARS))
+suppressPackageStartupMessages(library(ComplexHeatmap))
+suppressPackageStartupMessages(library(openxlsx))
+suppressPackageStartupMessages(library(RColorBrewer))
+suppressPackageStartupMessages(library(corrplot))
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(limma))
+## new package libraried/installed by Timo
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(pryr))
+suppressPackageStartupMessages(library(tidyHeatmap))
+suppressPackageStartupMessages(library(circlize))
+suppressPackageStartupMessages(library(kableExtra))
+suppressPackageStartupMessages(library(DT))
+suppressPackageStartupMessages(library(clusterProfiler))
+suppressPackageStartupMessages(library(org.Hs.eg.db))
+
+suppressPackageStartupMessages(library(org.Mm.eg.db))
+suppressPackageStartupMessages(library(Hmisc))
+suppressPackageStartupMessages(library(base64enc))
+suppressPackageStartupMessages(library(R.utils))
+suppressPackageStartupMessages(library(plotly))
+
+```
+
+```{r global-setup, include = FALSE,}
+Suffix <- "DSP_WTA"
+CachePath <- paste0("./results/rendering_cache_", Suffix, "/")
+PlotsPath <- paste0("./results/rendering_plots_", Suffix, "/")
+create_dir(path.list = c(CachePath,PlotsPath))
+
+space <- " 
+
+"
+options(knitr.kable.NA = '')
+`%!in%` <- Negate(`%in%`)
+
+# the previous method to copoy extdata/resource from EPARS package
+# to the working directory
+# Resource_info_Path <- paste0(system.file("extdata", package = "EPARS"), "/")
+# R.utils::copyDirectory(paste0(Resource_info_Path, "resource"), "resource")
+
+project_info_tbl <- read.xlsx(list_param$param_path, sheet = "project_info", colNames = FALSE)
+
+# define the company subject of the report
+if (!exists("Title_Belonged_Company")){
+	Title_Belonged_Company <- format_company_title(project_info_tbl$X2)
+}
+company_detail_list <- define_company_info(Title_Belonged_Company)
+vi_company_short <- company_detail_list[[1]]
+vi_company_long <- company_detail_list[[2]]
+vi_logo <- company_detail_list[[3]]
+vi_report_back <- company_detail_list[[4]]
+vi_back <- 	company_detail_list[[5]]
+
+knitr::opts_chunk$set(
+	cache =T,
+	cache.lazy = FALSE,
+	cache.comments = FALSE,
+	warning = FALSE,
+	message = FALSE,
+	echo = FALSE,
+	fig.align = "center",
+	# fig.keep = "none",
+	fig.keep = "all",
+	cache.path = CachePath,
+	fig.path = PlotsPath,
+	dev = "png",
+	collapse = TRUE)
+```
+
+```{r data-readin, results = 'hide', fig.width = 8}
+
+Norm_neg_path <- list_param$norm_data_path
+Probe_QC_1_path <- list_param$raw_data_path
+
+if (ncol(read.xlsx(file.path(Norm_neg_path), sheet = 1) %>% as.data.frame()) >=
+	ncol(read.xlsx(file.path(Probe_QC_1_path), sheet = 1) %>% as.data.frame())){
+	xlsx_with_annotation <- Norm_neg_path} else {xlsx_with_annotation <- Probe_QC_1_path}
+
+## 读取JX demo表达数据和注释数据，构建S4对象
+exp_group_object <- make_DSP_CTA_data_obj("DSP_CTA_data", exp_file = Norm_neg_path,
+											 raw_exp_file = Probe_QC_1_path, 
+											 anno_file = xlsx_with_annotation)
+## 手动配置分析相关参数（后续需统一放到配置文件中）
+exp_group_object@heatmap_groups <- heatmap_groups
+exp_group_object@config$group_stat <- checkGroupStatus(exp_group_object@heatmap_groups)
+exp_group_object@config$data_type <- "CTA"
+
+exp_group_object@config$org <- org 
+exp_group_object@config$heatmap_scale <- TRUE
+exp_group_object@qc_groups <- qc_groups
+exp_group_object@deg_groups <- deg_groups
+exp_group_object@config$heatmap_color <-
+	colorRamp2(c(-2, 0, 2), colors = c("royalblue3", "grey97", "indianred3"))
+# colors = c("#CCFFFF", "#000000", "#CC9900")
+exp_group_object@config$cor_color <- colorRampPalette(c("indianred3", "grey97", "royalblue3"))
+exp_group_object@config$pan_color <-  desat(c("royalblue3", "indianred3",
+										brewer.pal(name="Dark2", n = 8),
+										brewer.pal(name="Accent", n = 8),
+										brewer.pal(name="Set2", n = 8),
+										brewer.pal(name="Pastel1", n = 8),
+										brewer.pal(name="Pastel2", n = 8)),0.8)
+if(!exists("volcano_num_label_each") == T) 
+	{exp_group_object@config$deg$volcano_num_label_each <- 10} else 
+	{exp_group_object@config$deg$volcano_num_label_each <- volcano_num_label_each}
+if(!exists("fdr_cutoff") == T) {exp_group_object@config$deg$fdr_cutoff <- 0.05} else
+	{exp_group_object@config$deg$fdr_cutoff <- fdr_cutoff}
+if(!exists("lfc_cutoff") == T) {exp_group_object@config$deg$lfc_cutoff <- 1} else 
+	{exp_group_object@config$deg$lfc_cutoff <- lfc_cutoff}
+
+## temp
+epars_plot_setting<-function(object=exp_group_object,
+                               color_palette = c(brewer.pal(8, "Set2"), brewer.pal(8, "Set3"),
+                                                 brewer.pal(8, "Pastel2"), brewer.pal(8, "Pastel1"),
+                                                 brewer.pal(8, "Accent"), brewer.pal(8,"Dark2"))){
+  ps = object@plot_setting
+  ps$group_df = data.frame(object@anno[,object@heatmap_groups])
+  names(ps$group_df) = object@heatmap_groups #单个分组时正确显示分组名
+  ps$group_uniq = uniqList(ps$group_df)
+  ps$colors = color_palette
+  ps$group_color = ps$group_uniq
+  color_pos = 1
+  for (i in 1:length(ps$group_uniq))
+  {
+    subgroup_length = length(ps$group_uniq[[i]])
+    color_pos_start = color_pos
+    color_pos_end = color_pos_start + subgroup_length - 1
+    color_pos = color_pos_end + 1
+    ps$group_color[[i]] = ps$colors[color_pos_start:color_pos_end]
+    names(ps$group_color[[i]]) = ps$group_uniq[[i]]
+  }
+  object@plot_setting = ps
+  return(object)
+}
+
+exp_group_object <- epars_plot_setting(exp_group_object)
+exp_group_object <- epars_heatmap_anno_data(exp_group_object)
+
+# 读取项目信息中的每个分析步骤的详细描述信息
+dscrp_tbl <- read.xlsx(list_param$param_path, sheet = "description")
+dscrp_list <- dscrp_tbl[,2]
+names(dscrp_list) <- dscrp_tbl[,1]
+#### check the order 
+if(!all(colnames(exp_group_object@exp) == rownames(exp_group_object@anno))){
+  stop("The AOI order of expression matrix and annotation matrix is different")
+}
+```
+
+```{=html}
+<style>
+.tocify .tocify-header .active {background: #4E84CC;}
+.list-group-item:hover {background: #89B9FF;}
+#TOC::before {
+  content: "目 录";
+  display: block;
+  font-size: 1.5rem;
+  text-align: center;
+  color: #4E84CC!important;
+  padding-top: 2px;
+  padding-bottom: 5px;
+  font-weight: bold;
+}
+
+.epars-tbl {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: right;
+}
+.epars-tbl td, th {
+  border-bottom: 1px solid #F5F5F5;
+  padding: 10px;
+}
+.epars-tbl td:first-child, th:first-child {padding-left:16px;}
+.epars-tbl tr:nth-child(even){background-color: #F5F5F5;}
+.epars-tbl th {
+  background-color: #4E84CC!important;
+  color: white!important;
+}
+.epars-tbl tr:hover {background-color: #E6E6E6;}
+
+<!-- h1 { /* Header 1 */ -->
+<!--   background-image:url("data:image/png;base64,`r base64enc::base64encode(paste0(resource_path, vi_logo)) `"); padding-top: 1px !important; background-position:right top; background-size: 246px 47px; -->
+<!--   background-repeat: no-repeat; color: #4E84CC;} -->
+
+<!-- h1:after {content:' '; display: block; border-bottom:3px solid #4E84CC; -->
+<!--    border-radius:4px; padding-top:5px !important; -->
+<!--     -webkit-border-radius:4px; -moz-border-radius:4px; -->
+<!--     box-shadow:inset 0 1px 1px rgba(0, 0, 0, .05); -->
+<!--     -webkit-box-shadow:inset 0 1px 1px rgba(0, 0, 0, .05); -->
+<!--     -moz-box-shadow:inset 0 1px 1px rgba(0, 0, 0, .05);} -->
+<!-- .container {position:relative; width:100%; margin:0px; padding:0px;} -->
+<!-- .cover_img {width:auto; height:auto;} -->
+<!-- .cover_company_info {position:absolute; bottom:2%; left:1%; font-size:10px; color:#C8C8C8; -->
+<!--                    writing-mode: vertical-rl;} -->
+<!-- .cover_company_title {position:absolute; top:35%; left:5%; font-size:45px; color:#4E84CC;} -->
+<!-- .cover_report_title {position:absolute; top:40.5%; left:5%; font-size:35px; color:#969696;} -->
+<!-- .cover_project_title {position:absolute; top:46%; left:5%; font-size:30px; color:#4E84CC;} -->
+<!-- .cover_project_number {position:absolute; bottom:3.5%; right:3%; font-size:15px; color:#4E84CC;} -->
+<!-- .cover_project_date {position:absolute; bottom:1.5%; right:3%; font-size:15px; color:#969696;} -->
+<!-- .back_info {position:absolute; top:65%; left:30%; -->
+<!--             font-size:15px; color:#4E84CC;} -->
+<!-- body{font-size: 14px;} -->
+<!-- summary { -->
+<!--    text-decoration: underline;  -->
+<!--    /* font-weight: bold; */ -->
+<!--    /* color:#003C7B; */ -->
+<!--    } -->
+<!-- summary:hover {color: #4E84CC;} -->
+<!-- .details_text {  -->
+<!--   box-shadow: 1px 1px 1px grey; -->
+<!--   margin: 5px; -->
+<!--   border-left: 8px solid #4E84CC; -->
+<!--   border-radius: 2px; -->
+<!--   background-color: #EBEBEB!important; -->
+<!--   width: 100%; -->
+<!--   padding: 10px; -->
+<!-- } -->
+<!-- .details_text span {background-color: #EBEBEB!important;} -->
+<!-- dsrcp {font-weight: bold;} -->
+<!-- .disclaimer { -->
+<!--    border: 3px solid #4E84CC; -->
+<!--    background-color: #F5F5F5!important; -->
+<!--    width: 99%; -->
+<!--     font-weight: bold; -->
+<!--     font-size: 15px; -->
+<!--     font-family: SimHei; -->
+<!--     line-height: 30px; -->
+<!--     padding: 30px; -->
+<!-- } -->
+<!-- .signature { -->
+<!--    text-align: right; -->
+<!--     line-height: 25px; -->
+<!--     font-weight: bold; -->
+<!--     font-size: 15px; -->
+<!--     font-family: SimHei; -->
+<!-- } -->
+<!-- .fig_caption { -->
+<!--   text-align: center; -->
+<!--   font-size: .8rem; -->
+<!--   color: light-grey; -->
+<!-- } -->
+<!-- span.highlight { -->
+<!--   font-weight: bold; -->
+<!--   color: #4E84CC; -->
+<!--   font-size: 105%; -->
+<!--   display:inline-block; -->
+<!-- } -->
+</style>
+```
+<!-- <div class="container"> -->
+
+<!--   <img class="cover_img" src= "resource/DSP_report_cover.png"> -->
+
+<!--   <div class="cover_company_info">`r vi_company_long`</div> -->
+
+<!--   <div class="cover_company_title">`r vi_company_short`</div> -->
+
+<!--   <div class="cover_report_title">`r Title_Report_Version_Name`</div> -->
+
+<!--   <div class="cover_project_title">`r Title_Client_Name`</div> -->
+
+<!--   <div class="cover_project_number">报告编号 | **`r Title_Report_Number`**</div> -->
+
+<!--   <div class="cover_project_date">`r format(Sys.time(), '%B %d, %Y')`</div> -->
+
+<!-- </div> -->
+
+<br>
+
+# 报告基础信息
+
+## 项目信息
+
+本项目相关信息请参见下方表格。
+
+```{r project_info, results = 'asis', eval=F}
+tbl <- read.xlsx(list_param$param_path, sheet = "project_info")
+rownames(tbl)[2]<-"Yuce.DSP数字空间靶向全转录组学分析报告"
+tbl[2,2]<-"	Yuce DSP数字空间靶向全转录组学 科研服务项目"
+
+  print(kable(tbl, style = 'html', row.names = F, table.attr = "class=\'epars-tbl\'"))
+  cat("<br>")
+```
+
+## 主要简写与名词解释
+
+本报告中出现的专有名词缩写对应的意义和中文翻译请参见下方表格。
+
+```{r abbreviation, results = 'asis'}
+tbl <- read.xlsx(paste0(Resource_info_Path, "Permanent_Information/permanent_info.xlsx"), sheet = "DSP_abbreviation") %>% dplyr::filter(.,!(.[,1]=="NTC"))
+  print(kable(tbl, format = 'html', row.names = F, table.attr = "class=\'epars-tbl\'"))
+  cat("<br>")
+```
+
+<!-- rendering child markdown below -->
+
+```{r Lab-QC-DSP-WTA, child = if(QC_eval) 'rmd_modules/Lab_QC_DSP_WTA.Rmd'}
+```
+
+<br>
+
+```{r Standard-DSP-WTA, child = if(Standard_eval) 'rmd_modules/Standard_DSP_WTA.Rmd'}
+```
+
+<br>
+
+```{r Advanced-DSP-WTA, child = if(Advanced_eval) 'rmd_modules/Advanced_DSP_WTA.Rmd'}
+```
+
+# 参考来源
+
+<br>
+
+::: {#refs}
+:::
+
+<br><br>
+
+<hr />
+
+# 重要声明
+
+::: {.disclaimer}
+1.本检测分析报告仅对本次样品有效，不可作为临床诊断或治疗的依据。 <br>2.如对本检测分析报告存疑，请在报告交付后1个月内与我们联系。 <br>3.本公司对本检测分析报告保留最终解释权。 <br>4.本公司对本检测分析报告保密，仅合同签署方享有相关数据、分析内容。
+:::
+
+```{r disclaimer_names, results = 'asis'}
+
+if(as.logical(ifelse(is.null(list_param$sign),"F",list_param$sign))) cat('<div class="signature">
+<br>
+<br>实验操作 &emsp;
+<img src=', paste0("resource/", sig_operator, ".png") ,' style = "clear: right; BORDER-BOTTOM: solid 2px black;">
+<br>数据分析 &emsp;
+<img src=', paste0("resource/", sig_analyst, ".png"),'style = "clear: right; BORDER-BOTTOM: solid 2px black;">
+<br>报告核对 &emsp;
+<img src= ', paste0("resource/", sig_reviewer, ".png"),' style = "clear: right; BORDER-BOTTOM: solid 2px black;">
+<br>报告审批 &emsp;
+<img src= ',paste0("resource/", sig_approver, ".png") ,' style = "clear: right; BORDER-BOTTOM: solid 2px black;">
+<br><br>日&emsp;&emsp;期&emsp;&emsp;<date_sig style="font-size: large; BORDER-BOTTOM: solid 2px black;">', paste0(format(Sys.time(), '%Y/%m/%d')),'</date_sig>
+
+</div>
+')
+```
+
+</div>
+
+<hr />
+
+<!-- <div class="container"> -->
+
+<!--   <img class="cover_img" src= `r paste0("resource/", vi_report_back) `> -->
+
+<!--   <div class="back_info">`r vi_company_long `<br> -->
+
+<!--                         `r vi_back `<br> -->
+
+<!--                         网址：[www.yucebio.com](www.yucebio.com)</div> -->
+
+<!-- </div> -->
+
+::: {.tocify-extend-page data-unique="tocify-extend-page" style="height: 0;"}
+:::

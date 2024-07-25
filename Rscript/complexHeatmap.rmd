@@ -1,0 +1,87 @@
+---
+title: "Heatmap"
+author: "GuoHao"
+date: "2024/5/15"
+output: html_document
+---
+
+```{r}
+library(ComplexHeatmap)
+library(dplyr)
+```
+
+```{r}
+exp_group_object <- readRDS("~/work/DSP/YKKY0290/DSP_WTA/20240402_personal_analysis/DEG_res/exp_group_object.RDS")
+anno <- exp_group_object@anno %>% 
+  dplyr::filter(Group == 'Control' | SampleID == 'ICH_2') %>% 
+  dplyr::filter(Location %in% c('thalamus', 'Iba1')) # %>% 
+  # dplyr::select(SampleID)
+exp <- exp_group_object@exp %>% 
+  as.data.frame() %>% 
+  dplyr::select(all_of(rownames(anno)))
+```
+
+```{r}
+anit <- "FCER1G"
+pap <- c("CD74", "HLA-B", "IFI30", "B2M", "HLA-A", "HLA-DRB1", "HLA-DPA1", "HLA-DMA", "HLA-DRA", "HLA-DQB1", "HLA-E")
+damp <- c("HMGB1", "Apoe", "APOC1", "RPS2", "RPS4X", "RPS24", "RPS9", "DNAJC1", "DNAJB9", "SNCA", "GRN", "S100a11", "S100a6", "Trem2", "Tyrobp", "AIF1", "IFNGR1", "CTSC") %>% toupper
+sig_list <- list(
+  # ccc = ccc,
+  # eal = eal, 
+  anit = anit, 
+  pap = pap, 
+  damp = damp
+)
+sig_name <- list(
+  ccc = 'The classic complement cascade',
+  eal = 'Endocytosis and Lysosomal',
+  anit = 'Antigen',
+  pap = 'Processing and presentation',
+  damp = 'DAMPs and DAMP-sensing receptors'
+)
+```
+
+```{r}
+color_list <- list(
+  'The classic complement cascade' = "#FF7F00",
+  'Endocytosis and Lysosomal' = '#FF7F00', 
+  'Antigen' = "#D9D9D9", 
+  'Processing and presentation' = "#E7298A",
+  'DAMPs and DAMP-sensing receptors' = "#FDC086"
+)
+col_select <- function(x){
+  color_list[[x]]
+}
+```
+
+```{r}
+sig_df <- lapply(names(sig_list), \(.x){
+  data <- data.frame(Signature = sig_name[[.x]], Gene = sig_list[[.x]])
+}) %>% Reduce(rbind, .)
+
+exp <- exp_group_object@exp %>% 
+  as.data.frame() %>% 
+  dplyr::select(all_of(rownames(anno))) %>% 
+  dplyr::filter(rownames(.) %in% sig_df$Gene)
+anno <- arrange(anno, Group)
+ha <- HeatmapAnnotation(df = anno, annotation_name_side = 'right')
+row_ha <- rowAnnotation(Signatures = sig_df$Signature)
+left_ha <- rowAnnotation(Gene = anno_text(rownames(exp), 
+                                          location = 0.5, 
+                                          just = 'center',
+                                          gp = gpar(col = sapply(sig_df$Signature, col_select))))
+row_split <- sig_df$Signature
+names(row_split) <- sig_df$Gene
+p <- Heatmap(scale(exp), 
+        cluster_columns = F, 
+        cluster_rows = F,
+        row_split = row_split, 
+        row_title = NULL,
+        border = T,
+        column_split = anno,
+        show_column_names = F,
+        show_row_names = F,
+        top_annotation = ha, 
+        left_annotation = row_ha, 
+        right_annotation = left_ha)
+```

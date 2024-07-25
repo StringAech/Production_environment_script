@@ -1,0 +1,1422 @@
+---
+# title: "DSP WTA 标准分析报告"
+# author: "Hu Tianmu (Timo)"
+# date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    number_sections: true
+    theme: paper
+    smooth_scroll: false
+    keep_md: false
+    highlight: tango
+    self_contained: true
+    dev: "png"
+    df_print: paged
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+params:
+  json_path: "./raw_data/list_param.json"
+  extdata_path: "./resource/extdata/"
+  resource_path: "./resource/"
+bibliography: resource/ref.bib
+csl: resource/ieee.csl
+link-citations: true
+---
+
+```{r Standard-setup-wd, include = F,cache=FALSE}
+require(knitr)
+opts_knit$set(root.dir = normalizePath('../'))
+getwd_dir= normalizePath('.')%>%str_remove("rmd_modules")
+if (exp_group_object@config$group_stat == "Multiple group"){multiple_group <- TRUE} else {multiple_group <- FALSE}
+```
+
+`r if(multiple_group == TRUE){"### 单一分组基因表达量热图 {.tabset .tabset-fade}"}`
+
+```{r heatmap_based_on_group, eval = multiple_group, results = 'asis', fig.width = 8}
+cat("根据用户提供的不同分组信息，对每个分组进行了单独的聚类热图[@gu2016complex]分析，可以观察到组别之间基因表达的相似情况。其中数据均进行了归一化处理，让均值为0和标准差为1。将归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。默认使用最小方差法ward.D2聚类方法构建距离矩阵，距离值越小则AOI/ROI之间的相似度越大。本项目其结果热图展示如下，横轴代表每个AOI/ROI，纵轴代表用户所选panel中的每个基因，示例注释列在热图的顶部，图例显示了AOI/ROI分组信息，其基因表达值用渐变颜色表示，根据与项目中实验设计方案有关的AOI/ROI分组信息(")
+cat(exp_group_object@heatmap_groups , sep=", ")
+cat(")，下方按标签页展示了不同着色方式的聚类热图：")
+cat(space)
+
+#按分组画热图
+template <- "#### %s {.unlisted .unnumbered}
+"
+if(exp_group_object@config$group_stat == "Multiple group"){
+  #有多个分组
+
+  #exp_group_object_single = exp_group_object
+  for (i in exp_group_object@heatmap_groups){
+    exp_group_object_single = exp_group_object
+    exp_group_object_single@heatmap_groups = c(i)
+    exp_group_object_single <- epars_plot_setting(exp_group_object_single)
+    exp_group_object_single <- epars_heatmap_anno_data(exp_group_object_single)
+    
+    #AOI/ROI按分组排序
+
+    rownames(exp_group_object_single@plot_setting$group_df) <- rownames(exp_group_object_single@anno)
+    group_df_order = order(exp_group_object_single@plot_setting$group_df[,1])
+    ordered_sample <- rownames(exp_group_object_single@plot_setting$group_df)[group_df_order]
+    # rownames(exp_group_object_single@plot_setting$group_df) <- paste(rownames(exp_group_object_single@plot_setting$group_df),exp_group_object_single@plot_setting$group_df[,1],sep="_")
+    # colnames(exp_group_object_single@exp) = rownames(exp_group_object_single@plot_setting$group_df)
+    # group_df_order = order(exp_group_object_single@plot_setting$group_df[,1])
+    # ordered_sample <- rownames(exp_group_object_single@plot_setting$group_df)[group_df_order]
+
+	  FigWidth <- 0.1 * nrow(exp_group_object@anno) + 3
+    #配置单分组的显示样式
+    heat_mat <- htmp_scale(exp_group_object_single@exp)
+
+	p <- Heatmap(heat_mat,show_column_names = FALSE, 
+				show_row_names = FALSE,
+				heatmap_legend_param = list(title = "",legend_height = unit(4, "cm")),
+				column_order = ordered_sample,
+				column_names_rot = -90,
+				row_names_gp =  gpar(fontsize = 4),
+				column_names_gp =  gpar(fontsize = 5),
+				clustering_method_rows = "ward.D2",
+				name = "Scale(exp)",
+				cluster_column_slices = F,
+				cluster_rows = T,
+
+        # cluster_columns = T,
+				# column_split = exp_group_object_single@plot_setting$group_df,
+				# column_title = NULL,
+
+				heatmap_width = unit(5, "npc"),
+				heatmap_height = unit(7, "npc"),
+				clustering_method_columns = "ward.D2",
+				top_annotation = exp_group_object_single@plot_setting$heatmap_anno,
+				col = exp_group_object@config$heatmap_color
+	)
+    
+    
+    cat(sprintf(template, paste0(i)))
+	subchunkify(p, fig_width = FigWidth)
+	cat(space)
+	suppressMessages(save_pdf(p, paste0(PlotsPath, "heatmap_based_on_group_", i, ".pdf"), width = FigWidth))
+  }
+}
+```
+###  {.unlisted .unnumbered}
+<br>
+ 
+<!-- ### AOI/ROI相关性分析 -->
+
+<!-- <details><summary>相关性分析介绍</summary> -->
+
+<!-- <div class=details_text> -->
+
+<!-- 相关性分析，Correlation -->
+<!-- Analysis，是指对两个或多个具备相关性的变量元素进行分析，从而衡量两个变量因素的相关密切程度。相关性的元素之间需要存在一定的联系或者概率才可以进行相关性分析。 -->
+<!-- <br>相关性分析中最常用的方法为皮尔森相关系数。皮尔森积矩相关系数(Pearson -->
+<!-- product-moment correlation coefficient，Pearson's -->
+
+<!-- r)用于度量两个变量X和Y之间的相关程度（线性相关），其值介于-1与1之间。该系数广泛用于度量两个变量之间的线性相关程度。 -->
+
+<!-- 计算x和y的相关性参数$r_{xy}$的方式如下： -->
+<!-- $$r_{xy} = \frac{cov(x,\ y)}{\sqrt{var(x)}\ *\ \sqrt{var(y)}}$$ -->
+
+<!-- </details> -->
+
+<!-- 进一步分析各AOI/ROI之间的相关性，对用户选取的AOI/ROI总体表达进行相关性分析[@corrplot2021]。 -->
+<!-- <br>AOI/ROI之间的两两相关性以Pearson系数的方式被计算，数值分布在[-1,1]。Pearson系数值为0时代表两AOI/ROI之间无线性关系。数值的绝对值越高，AOI之间的相关性也越高。正值代表AOI之间呈正相关关系，负值代表AOI/ROI之间呈现负相关关系。 -->
+<!-- 下图呈现的是所有AOI/ROI间的相关性，横纵轴均代表每个AOI/ROI，各AOI/ROI名称显示在顶部和左侧，渐变颜色显示AOI/ROI间Pearson相关系数值，从[-1,1]以从蓝至红梯度显示。 -->
+<!-- <br><dsrcp>`r if("AOI/ROI相关性分析" %in% names(dscrp_list)){dscrp_list["AOI/ROI相关性分析"]}`</dsrcp> -->
+
+<!-- ```{r sample_correlation, results = 'hide', fig.width = 8, fig.height = 7} -->
+<!-- cor_matrix <- cor(exp_group_object@exp) -->
+<!-- # corrplot(cor_matrix, method="circle",type="full",order="hclust",hclust.method="ward.D2",tl.cex = 0.5) -->
+<!-- corrplot.mixed(cor_matrix, lower = "circle", upper="circle", order="hclust",hclust.method="ward.D2",tl.cex = 0.5, tl.pos = "lt", tl.col = desat("black"),  -->
+<!-- lower.col = colorRampPalette(desat(c("royalblue3", "grey97", "indianred3")))(10), -->
+<!-- upper.col = colorRampPalette(desat(c("royalblue3", "grey97", "indianred3")))(10)) -->
+
+<!-- # corrplot.mixed(cor_matrix, lower = "square", upper="circle", order="hclust",hclust.method="ward.D2",tl.cex = 0.5, tl.pos = "lt", tl.col = desat("black"),  -->
+<!-- # lower.col = colorRampPalette(desat(c("royalblue3", "grey97", "indianred3")))(10), -->
+<!-- # upper.col = colorRampPalette(desat(c("royalblue3", "grey97", "indianred3")))(10)) -->
+<!-- # cor.plot <- corrplot(corr = cor_matrix, col = colorRampPalette(c("blue", "white", "red"))(10), -->
+<!-- # 					 type = "upper", tl.pos = "t", tl.cex = 0.75) -->
+<!-- # cor.plot <- corrplot(corr = cor_matrix, col = colorRampPalette(c("blue", "white", "red"))(10), -->
+<!-- # 					 type = "lower", add = TRUE, method = "color", addCoef.col="black",  -->
+<!-- # 					 diag = FALSE, tl.pos = "l", tl.cex = 0.75, number.cex = 0.7) -->
+<!-- ``` -->
+### AOI/ROI降维算法
+
+<details><summary>降维介绍</summary>
+<div class=details_text>
+
+降维(Dimensional Reduction
+Technique)是一种统计学/机器学习方法，其目的为从一个大体量(高维度)的数据中，筛除冗余或无关变量并从原有变量中找出主要变量。**特征选择
+(Feature Selection)** 和**特征提取 (Feature Projection / Feature
+Extraction)** 是对高维度数据结构处理的典型方法。
+<br>·**特征选择**：提取数据子集，简化数据模型，去掉冗余和无关数据。
+<br>冗余数据:
+数据可以展现整体数据的特征，拥有生物学意义，但是与其他特征强相关。
+<br>无关数据: 低质量数据，基本无法体现特征。 <br>特征选择应用场景:
+机器学习、数据挖掘、多类型的高维生信数据，比如DNA微阵列、表达谱、单细胞、SNPs等。
+<br>·**特征提取**：和特征选择相似，从高维度数据
+(多个特征向量空间)中简化数据模型，去掉冗余和无关信息，提升计算处理效率。其理论支撑是认为数据都是有结构的，在低维度的数据结构中精炼提取数据结构的核心信号。降维处理后可产生低维度可视化图像，用于研究中的分析理解。
+<br>为了解不同分组之间AOI/ROI中基因表达的相似或不同之处并观察在数据变化的呈现上是否存在AOI/ROI分组间的偏见，我们采用了狭义上的降维，即特征提取，来识别相似片段的簇。特征提取其中又可分为**线性降维**与**非线性降维**。
+<br>·**线性降维**：低维向量的分量由相应高维向量的分量的线性函数给出，所以低维空间一定是线性变化出的空间中的一个。线性降维方法包含
+Principal Component Analysis (PCA)，Linear Discriminant Analysis (LDA)，
+Independent Component Analysis (ICA) 等。
+<br>·**非线性降维**：假设数据在高维空间中不是线性结构，而是非线性的流形。只有在足够小的范围内可以局部欧几里得空间化，用小规模的线性关系来表示局部数据点的分布，整体上试图在低维空间尽可能保留高维数据的流形结构。非线性降维方法包含
+T-distributed Stochastic Neighbor Embedding (t-SNE/tSNE), Uniform
+
+Manifold Approximation and Projection(UMAP)，Isomap，Locally-Linear
+Embedding (LLE), Autoencoder 等。
+
+</details>
+
+
+#### PCA降维 {.tabset .tabset-fade}
+
+<details>
+<summary>PCA介绍</summary>
+<div class=details_text>
+主成分分析，Principle Component Analysis（PCA），是用来探索和简化多变量复杂关系的常用方法，即通过降维找到数据间差异的最主要特征。PCA是**线性降维**中最重要的方法。
+<br> 在表达谱数据中，AOI/ROI之间的关系即为每个AOI/ROI中Assay的表达。 AOI/ROI在每一个Assay表达的差异可被视为一个单独的维度，整个表达谱即所有的Assay表达共同汇聚成一个多维空间。PCA试图从此多维空间中将特征提取为主成分(Principle Component, PC)。每个主成分解释了数据中一定百分比的变化。在主成分分析前进行数据缩放，找到特征向量（主成分，PC）来聚类AOI/ROI，并展示AOI/ROI在包含最大的数据差异的前两个主成分上的分布。
+</details>
+为了探究各AOI/ROI之间的关系，使用主成分分析(PCA)分析AOI/ROI差异的主要特征。在如下的二维点阵图中，每个AOI/ROI为图像中的一个点，横轴代表的是第一主成分，纵轴是第二主成分，轴坐标同时显示此主成分可以解释的数据间差异所占总数据差异的百分比。降维可视化的理论中，点阵图上越接近的一组数据点在对应AOI/ROI的整体表达水平也会更加相似。根据与项目中实验设计方案有关的AOI/ROI分组信息（**`r exp_group_object@heatmap_groups`**），下方按标签页呈现了不同着色方式的PCA图像，图例均为AOI/ROI分组的着色信息。
+<br><dsrcp>`r if("PCA降维" %in% names(dscrp_list)){dscrp_list["PCA降维"]} `</dsrcp>
+
+
+```{r Init_Step,include=FALSE}
+# Init Step to make sure that the dependencies are loaded
+htmltools::tagList(datatable(cars))
+htmltools::tagList(ggplotly(ggplot()))
+```
+
+```{r PCA-plot, results = 'asis', fig.height = 7, fig.width = 8}
+# PCA plot
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+#interactive=T控制可交互
+#text = paste('AOI:', Unique_Sample_ID, '<br>SegmentLabel:', SegmentLabel) 控制交互的显示信息
+exp_group_object <- PCA_plot(exp_group_object, CachePath = CachePath,
+							  group = exp_group_object@heatmap_groups, 
+							  color_palette = exp_group_object@config$pan_color,
+							  template = template, space = space,
+							  prefix = "PCA")
+
+```
+<br>
+
+此外，如下的Loading Plot(PCA Arrow Plot)则从基因层面拆分剖析了单个基因对主成分的影响。如下图所示每个箭头指代一个基因，对应基因的名称在箭头头部呈现。横纵坐标分别为PCA分析中的第一主成分和第二主成分。箭头的长度越长代表此基因对主成分分析的影响越大。
+<br><dsrcp>`r if("基因主成分分析" %in% names(dscrp_list)){dscrp_list["基因主成分分析"]} `</dsrcp>
+
+```{r PCA-loading-plot, results = 'asis', fig.height = 7, fig.width = 8}
+
+PCA_arrow_plot(exp_group_object, CachePath = CachePath, nfeature = 15, prefix = "PCA_arrow")
+
+```
+
+#### tSNE降维 {.tabset .tabset-fade}
+
+<details>
+<summary>tSNE介绍</summary>
+<div class=details_text>
+t-distributed Stochastic Neighbor Embedding (t-SNE/tSNE) [@van2008visualizing]是特征提取中非线性降维的方法之一。tSNE的步骤可以被概括为：
+<br>1. tSNE构建一个高维对象之间的概率分布，使得相似的对象有更高的概率被选择，而不相似的对象有较低的概率被选择；
+<br>2. tSNE在低维空间里在构建这些点的概率分布，使得这两个概率分布之间尽可能的相似。
+<br>值得注意的是，tSNE算法已被认为存在些许缺陷。最主要的缺陷是tSNE的图像趋向于保留局部结构，缺乏全局的保留，即只有近距离/聚类内部的数据点间距离保留了充分的意义，而远距离数据点的不相似性不能保证(即降维图中相近的细胞更加相似，但距离很远的细胞并不一定意味着更不相似)。此外tSNE在K-nearest neighbor步骤时会运用过量内存导致计算成本相较其他方法偏高。
+</details>
+为了探究各AOI/ROI之间关系，使用tSNE降维分析AOI/ROI差异的主要特征。在如下的二维点阵图中，每个AOI/ROI为图像中的一个点横轴和纵轴代表的是经tSNE降维处理后的二维坐标轴，每一个点对应一个AOI/ROI。降维可视化的理论中，点阵图上越接近的一组数据点在对应AOI/ROI的整体表达水平也会更加相似。根据与项目中实验设计方案有关的AOI/ROI分组信息（**`r exp_group_object@heatmap_groups`**），下方按标签页呈现了不同着色方式的tSNE二维化图像，图例均为AOI/ROI分组的着色信息。
+<br><dsrcp>`r if("tSNE降维" %in% names(dscrp_list)){dscrp_list["tSNE降维"]} `</dsrcp>
+
+```{r tSNE-plot, results = 'asis', fig.height = 7, fig.width = 8}
+# UMAP plot
+template <- "##### %s {.unlisted .unnumbered}
+"
+exp_group_object <- tSNE_plot(exp_group_object, CachePath = CachePath,
+							  group = exp_group_object@heatmap_groups,
+							  color_palette = exp_group_object@config$pan_color,
+							  template = template, space = space,
+							  prefix = "tSNE")
+
+```
+
+#### UMAP降维 {.tabset .tabset-fade}
+
+<details>
+<summary>UMAP介绍</summary>
+<div class=details_text>
+Uniform Manifold Approximation and Projection (UMAP) [@mcinnes2018umap]是另一个非线性降维方法。UMAP 总体上遵循tSNE的理念，但引入了许多改进，如不同的cost function以弥补全局信息的保留，normalization的免除等等。
+具体算法的区别包括，用binary Cross-Entropy (CE) 作为它的cost function，与 tSNE的KL-divergence不同，成对欧几里得距离的概率不会指数级衰减。在高维中使用exponential probability distribution取代Euclidean distances，在低维中curves 1 / (1+a*y^(2b)) 取代t-distribution，
+用nearest neighbors个数代替tSNE的perplexity。因为计算方式，概率已经属于[0,1]，不采用额外normalization，和tSNE相比会显著降低运算时间。
+<br>UMAP现在被更多学者接受，认为在大多数情况下是比tSNE更有效的非线性降维方式。实际情况中仍需根据数据分布等具体情况选择降维方法。对体量较大的数据，现在学术界部分认为PCA筛选后再结合非线性降维UMAP是最有效且准确的降维可视化方案，但因具体数据类型的多样性原因并没有公认的最佳方案和标准流程的共识。
+</details>
+为了探究各AOI/ROI之间的关系，使用UMAP降维分析AOI/ROI差异的主要特征。在如下的二维点阵图中，每个AOI/ROI为图像中的一个点，横轴和纵轴代表的是经UMAP降维处理后的二维坐标轴，每一个点对应一个AOI/ROI。降维可视化的理论中，点阵图上越接近的一组数据点在对应AOI/ROI的整体表达水平也会更加相似。根据与项目中实验设计方案有关的AOI/ROI分组信息（**`r exp_group_object@heatmap_groups`**），下方按标签页呈现了不同着色方式的UMAP二维化图像，图例均为AOI/ROI分组的着色信息。
+<br><dsrcp>`r if("UMAP降维" %in% names(dscrp_list)){dscrp_list["UMAP降维"]} `</dsrcp>
+
+```{r UMAP-plot, results = 'asis', fig.height = 7, fig.width = 8}
+# UMAP plot
+template <- "##### %s {.unlisted .unnumbered}
+"
+exp_group_object <- UMAP_plot(exp_group_object, CachePath = CachePath,
+							  group = exp_group_object@heatmap_groups, 
+							  color_palette = exp_group_object@config$pan_color,
+							  template = template, space = space,
+							  prefix = "UMAP")
+
+```
+## 差异分析
+
+<details>
+
+<summary>差异分析命名介绍</summary>
+
+<div class=details_text>
+
+差异分析模块的个性化程度很高。主要包括如下几个方面：
+<br>**a.**同一份报告往往囊括多个差异分析模块，探究不同组别间的差异；
+<br>**b.**对每一次差异比较，往往存在需要对数据进行不同方式的筛选后再进行差异分析；
+<br>**c.**若某个注释信息包含多个类别时，差异分析的两两比较需要明确指定分组类别；
+<br>面对此种个性化程度高的差异分析数据输入，我们在分析以及呈现中将差异分析模块的信息尽量完整地展示。
+<br>对应在下方报告每一个差异分析分组模块，模块标签的呈现将包含： <br>
+**1.** 差异分析中想要探究差异的分组 ； <br> **2.**
+此分析用于限定AOI/ROI亚群所需的筛选信息。 <br> 模块标签的范例如下： <br>
+**"Response的差异"** <br>
+该标签意义：在所有AOI/ROI之中，去研究不同的Response分组之间每个基因的差异表达。
+<br> **"Sex为Male的Response的差异"** <br>
+该标签意义：在Sex为Male的AOI/ROI亚群之中，去研究不同的Response分组之间每个基因的差异表达。
+<br> **"Sex为Male，且Segment为TME的Response的差异"** <br>
+该标签意义：对AOI/ROI先进行多次筛选，在Sex为Male、且Segment也为TME的AOI/ROI亚群之中，去研究不同的Response分组之间每个基因的差异表达。
+<br> **"Segment为TME的Patient中病人2比病人1的差异"** <br>
+该标签意义：在Segment为TME的AOI/ROI亚群中，去研究Patient标签信息为病人2与病人1之间表达的差异。若Patient包含其他类别，如病人3、病人4等，则会被排除在分析之外。此标注方式允许了在一个注释信息有较多种类别时中挑选其中的两个分组研究其间的差异表达。
+
+</details>
+
+针对用户所选Panel中的基因，根据用户提供的分组信息，对其进行表达差异分析，以研究在不同条件下表达有显著差异的基因，或在不同因素下基因突变等结构发生改变导致差异的基因。基于DSP-WTA技术平台的数据类型，本项目主要使用edgeR方法进行差异检测[@robinson2010edger]。
+
+```{r DE_dir, results = 'hide'}
+CachePath <- sub('[/][^/]+$', '/4.Differential_Expression/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/4.Differential_Expression/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+
+差异分析相关的数据图表将被保存至 **`r CachePath`**。
+
+### Gene差异分析
+
+<details>
+
+<summary>
+
+Fold Change, p-value 和 q-value 介绍
+
+</summary>
+
+<div class=details_text>
+
+**Fold Change**，即为不同组别中AOI/ROI同一个基因表达水平的变化倍数，是用于检测差异表达基因的最基本的方法，其能够直接地得到两个实验组别间的基因表达差异比较。一般分析常用阈值为log2(Fold Change) \> 1，即两个组别中的表达相差两倍以上。本
+次项目中使用的阈值为：**`r exp_group_object@config$deg$lfc_cutoff`**。需注意的是，单独观察log2(Fold Change)可能存在误区，基因表达丰度的问题(基因信号值偏低等)会对Fold Change产生影响。
+<br> **P值(p-value)**是统计学检验变量，代表着差异的显著性。T检验是差异基因表达检测中的常用统计方法，对每个基因进行p-value的计算，就可以在统计学角度衡量此基因假阳性的概率。如果p-value越低，那么挑选该基因出现假阳性的概率越低，其差异显著的可验证性就越高。
+<br> **Q值(q-value)**则是在P值(p-value)基础之上进一步基于多重检验校正的统计学检验变量。在较大的生物学项目中，单次检验的数量级庞大，即项目往往存在多重检验效应(multiple test)。统计学角度基于单次比较的检验标准会相对显得宽松，在单次检验且对象增多时的叠加效应使得阳性错误的整体概率增加。q
+-value的原理即为按照阳性错误(假阳性)出现的概率相对应提高p-value判断的标准，从而在多重检验中降低总体犯错的概率[@benjamini1995controlling]。一般分析常用的阈值为FDR \<0.05，其含义为：对于一个单次差异表达检验中无论得到多少个差异基因，这些差异基因中出现假阳性的概率在5%以内。本
+次项目中使用的阈值为：**`r exp_group_object@config$deg$fdr_cutoff`**。
+<br>p-value和q-value的具体计算方式如下： $${p{\text -}value}(x) = \inf _{\Gamma _{\alpha }\ :\ t\ \in \ \Gamma _{\alpha }\ } Pr\ (H=0\ |\ T \in \Gamma _{\alpha })$$ $${q{\text -}value}(x) = \inf _{\Gamma _{\alpha }\ :\ t\ \in \ \Gamma _{\alpha }\ } pFDR\ (\Gamma _{\alpha })$$
+
+</details>
+
+在利用数据比较分析不同组别中同一个基因是否存在差异表达时，一般选取两个标准：差异表达倍数（Fold Change）和q-value，即经FDR校正后的P值（False Discovery Rate (FDR) corrected p-value）。
+<br>本次项目中鉴别是否显著差异表达使用的阈值为：False Discovery Rate (FDR) 值\<**`r exp_group_object@config$deg$fdr_cutoff`**，同时log2 (Fold Change)的绝对值>**`r exp_group_object@config$deg$lfc_cutoff`**。
+
+
+```{r DEG-calculation, results = 'hide', fig.width = 6, fig.height = 6,}
+#更改factor顺序
+suppressMessages(library(forcats))
+# Based on the input string information for DEG groups, setup basic structure
+#  for deg_object_list before any DE calculation.
+deg_object_list <- setup_deg_object_from_string(exp_group_object@deg_groups)
+#### defferential gene analysis ####
+library(parallel);#加载并行计算包
+cl <- makeCluster(20);# 初始化cpu集群
+do.data=function(g_complex=1){
+	# 使用整理好的过滤信息对AOI进行过滤
+
+	count = exp_group_object@exp
+	groupinfo <- factor(data.frame(exp_group_object@anno)[[deg_object_list[[g_complex]]@groupinfo[[1]] ]])
+
+	if (deg_object_list[[g_complex]]@filtering_boolean == FALSE && length(deg_object_list[[g_complex]]@groupinfo) == 1){
+			deg_object_list[[g_complex]]@filtered_sample <- colnames(exp_group_object@exp)
+			deg_object_list[[g_complex]]@filtered_matrix <- count
+	} else{
+		tmp_filtered_list <- list()
+		# 针对每一个AOI筛选条件对每个AOI进行判断
+		for (per_filter in 1:length(deg_object_list[[g_complex]]@filtering_list)){
+			tmp_filtered_list[[per_filter]] <- eval(parse(text = 
+								deg_object_list[[g_complex]]@filtering_list[[per_filter]]))
+		}
+		# 取交集，所有筛选条件均通过的AOI/ROI被留存下来
+		tmp_filtered_list <- Reduce("&",tmp_filtered_list)
+		deg_object_list[[g_complex]]@filtered_sample <- colnames(exp_group_object@exp)[tmp_filtered_list]
+		deg_object_list[[g_complex]]@filtered_matrix <- count[ ,tmp_filtered_list]
+		groupinfo <- factor(groupinfo[tmp_filtered_list])
+	}
+  system(paste("echo",g_complex,">>run.txt"))
+
+	#输入差异分组时,要求control在前,case在后
+	.group <- deg_object_list[[g_complex]]@groupinfo[[1]]
+	.case <- deg_object_list[[g_complex]]@groupinfo[[3]]
+	.control <- deg_object_list[[g_complex]]@groupinfo[[2]]
+	#按照输入的分组顺序进行排序
+  if(length(unique(groupinfo))>1){
+	groupinfo <- forcats::fct_relevel(groupinfo,c(.control,.case))
+	# prefix
+	prefix_string <- stringr::str_extract(deg_object_list[[g_complex]]@label_string,".*中")
+	label_string <- paste0(prefix_string,.case,"比",.control,"的差异")
+	deg_object_list[[g_complex]]@label_string <- label_string
+	# # 去除管家和IGG相关Assay
+	# hk_igg_assay <- append(exp_group_object@config$igg_names, exp_group_object@config$hk_names)
+	# deg_object_list[[g_complex]]@filtered_matrix <- deg_object_list[[g_complex]]@filtered_matrix[!row.names(deg_object_list[[g_complex]]@filtered_matrix) %in% hk_igg_assay,]
+
+	
+   Patient=exp_group_object@anno$Patient[match( colnames(deg_object_list[[g_complex]]@filtered_matrix),rownames(exp_group_object@anno))]
+
+  #formula=as.formula(paste0("`",y,"` ~ factor(`",x,"`)+ (1|`",Patient,"`)" ) )
+  #afex::lmer_alt(formula,data = tmp_df_filtered)
+  #b%>%base::summary()%>%{.[["coefficients"]][2,5]}
+  	tmp_deg <- obtain_edgeR_DE(matrix = deg_object_list[[g_complex]]@filtered_matrix,
+						groupinfo = groupinfo, 
+						lfc_cutoff = exp_group_object@config$deg$lfc_cutoff,
+				  		fdr_cutoff = exp_group_object@config$deg$fdr_cutoff, 
+				  		outdir = CachePath, 
+	  					prefix = paste0("DE_list_" ,deg_object_list[[g_complex]]@label_string))
+
+    tmp_deg=data.frame(tmp_deg,check.names = F)
+    write.table(tmp_deg, paste0(CachePath, "/", paste0("DE_list_" ,deg_object_list[[g_complex]]@label_string), "_edgeR.csv"), 
+        sep = ",", row.names = T, col.names = NA)
+data=new('deg_data')
+#data@groupinfo
+data@result_df=tmp_deg
+data@filtered_matrix=deg_object_list[[g_complex]]@filtered_matrix
+data@filtered_sample=deg_object_list[[g_complex]]@filtered_matrix%>%colnames()
+data@groupinfo=deg_object_list[[g_complex]]@groupinfo
+ 	prefix_string <- stringr::str_extract(deg_object_list[[g_complex]]@label_string,".*中")
+ 	label_string <- paste0(prefix_string,.case,"比",.control,"的差异")
+data@label_string <- label_string
+
+	# save the deg result back into the deg_object_list, in the result_df
+	return(data)
+  }
+  return(data.frame())
+}
+clusterExport(cl,'exp_group_object');
+clusterExport(cl,'deg_object_list');
+clusterExport(cl,'CachePath');
+clusterEvalQ(cl,library(dplyr));#添加并行计算中用到的包
+clusterEvalQ(cl,library(EPARS));#添加并行计算中用到的包
+get1=parLapply(cl,1:length(deg_object_list), do.data)
+for (g_complex in 1:length(deg_object_list)){
+deg_object_list[[g_complex]] <- get1[[g_complex]]    
+}
+
+parallel::stopCluster(cl)
+saveRDS(deg_object_list,"deg_object_list.RDS")
+# save the deg_object_list result S4 object back into the toal 
+# exp_group_object, inside the @deg section.
+a=list()
+f=lapply(names(deg_object_list),\(i) {
+  if(class(deg_object_list[[i]])=="data.frame"){return(0)}
+   return(deg_object_list[[i]]@result_df|>head(n=1)|>nrow())
+})%>%unlist%>%as.logical%>%which()
+names=names(deg_object_list)[f]
+for (i in 1:length(f)){
+	a[[i]] <- deg_object_list[[f[i]]]
+}
+names(a)=names
+deg_object_list=a
+for(i in deg_object_list%>%names){
+  deg_object_list[[i]]
+}
+exp_group_object@deg<- deg_object_list
+
+
+
+# 给差异分析增加人类可读的描自然语言描述
+for (g in names(exp_group_object@deg)){
+	tmp_groupinfo <- exp_group_object@deg[[g]]@groupinfo[[1]]
+	if (length(exp_group_object@deg[[g]]@groupinfo) >= 2){
+		tmp_groupinfo_1 <- exp_group_object@deg[[g]]@groupinfo[[2]]
+		tmp_groupinfo_2 <- exp_group_object@deg[[g]]@groupinfo[[3]]
+	} else{
+		tmp_groupinfo_1 <- levels(factor(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]]))[1]
+		tmp_groupinfo_2 <- levels(factor(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]]))[2]
+	}
+	
+  exp_group_object@deg[[g]]@natural_annotation <- paste0(sprintf("\n\n 此差异分析研究的是从 **%s** 的数值中分析 **%s** 和 **%s** 两个组别的AOI/ROI 之间的差异表达。如果一个基因在此差异表达中**上调(UP)**，代表着 **%s** 的AOI/ROI中此基因的表达相对 **%s** 的AOI/ROI表达**增高**，相反**下调(DOWN)**代表 **%s** 的AOI/ROI中此基因的表达相对 **%s** 的AOI/ROI表达**降低**。",   paste0(tmp_groupinfo),
+							paste0(tmp_groupinfo_1), paste0(tmp_groupinfo_2), 
+							paste0(tmp_groupinfo_2), paste0(tmp_groupinfo_1),
+  							paste0(tmp_groupinfo_2), paste0(tmp_groupinfo_1)))
+}
+
+
+saveRDS(exp_group_object,"exp_group_object.RDS")
+
+
+```
+
+#### 差异基因火山图 {.tabset .tabset-fade}
+
+本项目中使用火山图的形式展示差异表达基因的Fold Change，及FDR值，其结果如下：横轴显示基因表达差异倍数的log2变换值，纵轴表示FDR的-log10变换值，每一个点代表一个基因，点的颜色表征差异表达基因是否显著差异表达，图中灰色的基因表示在对应的差异分析中未见差异表达，蓝色对应为表达下调，红色对应为表达上调。根
+据用户提供的AOI/ROI信息，分组结果按标签页排列显示。
+<br><dsrcp>`r if("差异基因火山图" %in% names(dscrp_list)){dscrp_list["差异基因火山图"]}`</dsrcp>
+```{r DEG-volcano, results = 'asis', fig.width = 6, fig.height = 6}
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+#### 火山图 ####
+#glm_diff=T
+for (g in names(exp_group_object@deg)){
+  cat(space)
+  cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string)))
+  cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation)))
+  # cat(exp_group_object@deg[[g]]@natural_annotation)
+  if("logFC"%in%colnames(exp_group_object@deg[[g]]@result_df)){
+      exp_group_object@deg[[g]]@result_df$log2FoldChange=exp_group_object@deg[[g]]@result_df$logFC
+  exp_group_object@deg[[g]]@result_df$padj=exp_group_object@deg[[g]]@result_df$FDR
+  
+  }
+
+      p <- suppressMessages(EPARS::volcano_edgeR_plot(exp_group_object@deg[[g]]@result_df, genelist = NULL, 
+  						FDRcutoff = exp_group_object@config$deg$fdr_cutoff,
+  						lfc = exp_group_object@config$deg$lfc_cutoff,
+  						num_label_each = exp_group_object@config$deg$volcano_num_label_each,num_top_n=100000))
+
+  
+  subchunkify(p, fig_width = 8)
+  ggsave(paste0(PlotsPath, "DEG_volcano_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),".pdf"),
+	   plot = p, width = 9, height = 9)
+  cat(space)
+}
+```
+
+####  {.unlisted .unnumbered}
+
+<br>
+
+#### 差异基因表格 {.tabset .tabset-fade}
+
+用表格的形式展示差异基因的具体分析结果。每
+一行对应一个Assay即基因，表格中呈现了每个基因在两个分组中代表差异显著性的p-value和基因在两组之间发生改变的具体方向。其
+中对于每一个基因，若其 q-value \< **`r exp_group_object@config$deg$fdr_cutoff`**，同时 log2(Fold Change)的绝对值 \> **`r exp_group_object@config$deg$lfc_cutoff`**，则会在Change中被标记为显著(UP or DOWN)并呈现在下方表格中。依
+照所选的差异分析分组信息，阈值筛选后的差异表达的基因结果按标签页排列显示。
+<br><dsrcp>`r if("差异基因表格" %in% names(dscrp_list)){dscrp_list["差异基因表格"]}`</dsrcp>
+
+```{r DEG-table, results = 'asis', fig.width = 6, fig.height = 6}
+template <- "##### %s {.unlisted .unnumbered}
+"
+for (g in names(exp_group_object@deg)){
+  cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string)))
+  cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation)))
+  # cat(exp_group_object@deg[[g]]@natural_annotation)
+  cat("\n")
+	print(kable((exp_group_object@deg[[g]]@result_df %>% dplyr::filter(change != "NOT")),
+				format = 'html', row.names = T, 
+				table.attr = "class=\'epars-tbl\'") %>% row_spec(0, bold = T, color = "white", background = "#4E84CC") %>% kable_material("striped") %>% scroll_box(height = "450px"))
+
+  cat(space)
+}
+
+```
+
+####  {.unlisted .unnumbered}
+
+<br>
+
+#### 差异基因热图 {.tabset .tabset-fade}
+
+对得到的差异基因进行聚类分析，热图[@gu2016complex]展示结果如下，其中数据均进行了归一化处理，让均值为0和标准差为1。将
+归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。默
+认使用最小方差法ward.D2聚类方法构建距离矩阵，距离值越小则AOI/ROI之间的相似度越大。本
+项目通路聚类分析结果如下，横轴代表每个AOI/ROI，纵轴代表分组中差异表达的基因，示例注释列在热图的顶部，图例显示了AOI/ROI分组信息，其基因表达值用渐变颜色表示，基因名按行显示并列在热图的右侧，根据用户提供的AOI/ROI信息，分组结果按标签页排列显示。
+<br><dsrcp>`r if("差异基因热图" %in% names(dscrp_list)){dscrp_list["差异基因热图"]}`</dsrcp>
+
+
+```{r DEG_heatmap, results = 'asis', fig.width = 10,}
+
+template <- "##### %s {.unlisted .unnumbered}
+"
+
+for (g in names(exp_group_object@deg)){
+	exp_group_object_single = exp_group_object
+	exp_group_object_single@exp <- exp_group_object_single@exp[ , which(colnames(exp_group_object_single@exp) %in% (exp_group_object@deg[[g]]@filtered_sample))]
+	exp_group_object_single@anno <- exp_group_object_single@anno[ which(rownames(exp_group_object_single@anno) %in% (exp_group_object@deg[[g]]@filtered_sample)), ]
+	exp_group_object_single@heatmap_groups =  gsub("\\(.*","", sapply(strsplit(g, ","), "[", 1))
+    exp_group_object_single <- epars_plot_setting(exp_group_object_single)
+    exp_group_object_single <- epars_heatmap_anno_data(exp_group_object_single)
+    top_anno <- exp_group_object_single@plot_setting$heatmap_anno
+	filtered_list <- rownames(exp_group_object@deg[[g]]@result_df %>% 
+							  	dplyr::filter(exp_group_object@deg[[g]]@result_df$change != "NOT"))
+	mtx <- subset(exp_group_object_single@exp, rownames(exp_group_object_single@exp)
+				   %in% filtered_list)
+	p <- plot_Heatmap(mat = mtx, anno = top_anno,
+					  scale = TRUE, cluster_rows = T, show_row_names = T,
+					  htmp_color = exp_group_object@config$heatmap_color,show_column_names = FALSE)
+	cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string)))
+	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation)))
+	# cat(exp_group_object@deg[[g]]@natural_annotation)
+	subchunkify(p, fig_width = 10)
+	suppressMessages(save_pdf(p, paste0(PlotsPath, "DEG_heatmap_",gsub("的差异","",exp_group_object@deg[[g]]@label_string), ".pdf"), width = 10))
+	cat(space)
+}
+```
+
+####  {.unlisted .unnumbered}
+
+<br>
+
+#### 差异富集分析
+
+
+基因富集分析是分析基因表达信息的一种方法，富集是指将基因按照先验知识，也就是基因组注释信息进行分类。通过对差异基因的GO/KEGG富集分析，可以找到富集的差异基因Pathway，定位其参与的信号通路，寻找不同AOI/ROI的差异基因可能与哪些基因功能的改变相关。此处对差异分析中上调和下调的基因分别利用ORA的方法进行GO和KEGG富集分析。
+
+```{r ORA_pathway_dir, results = 'hide'}
+CachePath <- sub('[/][^/]+$', '/5.Enrichment_Analysis/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/5.Enrichment_Analysis/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+
+富集分析相关的数据图表将被保存至 **`r CachePath%>%str_remove( fixed(getwd_dir))`**。
+<br><dsrcp>`r if("差异富集分析" %in% names(dscrp_list)){dscrp_list["差异富集分析"]}`</dsrcp>
+
+
+```{r ORA_enrich_calculation, results = 'asis', fig.width = 12, fig.height = 13}
+p1_list <- list()
+p2_list <- list()
+
+
+for (g in names(exp_group_object@deg)){
+	message("Executing enrichment analysis for DE group -",g, "- ...")
+	tmp_deg <- exp_group_object@deg[[g]]@result_df
+	filtered_up <- rownames(tmp_deg %>% dplyr::filter(tmp_deg$change == "UP"))
+	filtered_down <- rownames(tmp_deg %>% dplyr::filter(tmp_deg$change == "DOWN"))
+	GO_UP <- enrichGOfunction(filtered_up) #pvalueCutoff  = 1, qvalueCutoff  = 1
+	GO_DOWN <- enrichGOfunction(filtered_down)
+	KEGG_UP <- enrichKEGGfunction(filtered_up) #pvalueCutoff  = 1, qvalueCutoff  = 1
+	KEGG_DOWN <- enrichKEGGfunction(filtered_down)
+	write.table(as.data.frame(GO_UP[[1]]), 
+				file = paste0(CachePath, gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_GOEnrich_UPGene.csv"), 
+				 sep = ",", row.names = T, col.names = NA)
+	write.table(as.data.frame(GO_DOWN[[1]]), 
+				file = paste0(CachePath, gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_GOEnrich_DOWNGene.csv"), 
+				 sep = ",", row.names = T, col.names = NA)
+	write.table(as.data.frame(KEGG_UP[[4]]), 
+				file = paste0(CachePath, gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_KEGGEnrich_UPGene.csv"), 
+				 sep = ",", row.names = T, col.names = NA)
+	write.table(as.data.frame(KEGG_DOWN[[4]]), 
+				file = paste0(CachePath, gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_KEGGEnrich_DOWNGene.csv"), 
+				 sep = ",", row.names = T, col.names = NA)
+
+	exp_group_object@deg[[g]]@deg_enrich$GO_UP <- as.data.frame(GO_UP[[1]])
+	exp_group_object@deg[[g]]@deg_enrich$GO_DOWN <- as.data.frame(GO_DOWN[[1]])
+	exp_group_object@deg[[g]]@deg_enrich$KEGG_UP <- as.data.frame(KEGG_UP[[4]])
+	exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN <- as.data.frame(KEGG_DOWN[[4]])
+
+	p <- ggarrange(GO_UP[[2]], KEGG_UP[[2]], GO_DOWN[[2]], KEGG_DOWN[[2]], 
+				   labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
+				   		   "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
+				   ncol = 2, nrow = 2, heights = 13, widths = 12)
+	p1_list[[g]] <- p
+	
+	
+	p2 <- ggarrange(GO_UP[[4]], KEGG_UP[[5]], GO_DOWN[[4]], KEGG_DOWN[[5]], 
+				   labels = c("GO enrich for UP regulated genes", "KEGG enrich for UP regulated genes",
+				   		   "GO enrich for DOWN regulated genes", "KEGG enrich for DOWN regulated genes"),
+				   ncol = 2, nrow = 2, heights = 13, widths = 12)
+	p2_list[[g]] <- p2
+	
+}
+
+```
+
+##### 富集分析气泡图 {.tabset .tabset-fade}
+
+差异基因富集分析的结果使用散点图(又称气泡图)展示如下，横轴代表富集系数，即富集到这个Pathway上的基因与富集分析基因总数目的百分比，越偏向右侧的分布说明富集程度越大。纵
+轴代表分组中差异表达基因富集到的Pathway名称，点的大小代表富集到此Pathway下的差异基因数目，点越大表示此Pathway差异基因越多。其
+渐变颜色表示富集信号通路的p值，越红表示p值越小，即富集越明显。根
+据用户提供的AOI/ROI信息，分组结果按标签页排列显示。
+<br><dsrcp>`r if("富集分析气泡图" %in% names(dscrp_list)){dscrp_list["富集分析气泡图"]}`</dsrcp>
+
+
+```{r ORA_enrich_bubble, results = 'asis', fig.width = 12, fig.height = 14}
+template <- "###### %s {.unlisted .unnumbered}
+"
+for (g in names(exp_group_object@deg)){
+	cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string)))
+	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation)))
+	# cat(exp_group_object@deg[[g]]@natural_annotation)
+	subchunkify(p1_list[[g]], fig_height = 14, fig_width = 12)
+	ggsave(paste0(PlotsPath, "enrichment_bubbleplot_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),".pdf"), 
+											plot = p1_list[[g]], height = 14, width = 12)
+	cat(space)
+}
+
+```
+
+#####  {.unlisted .unnumbered}
+
+<br>
+
+##### 富集分析网络图 {.tabset .tabset-fade}
+
+差异基因富集分析的结果使用网络图展示如下。富
+集分析中的网络图可以将关键基因和富集到的通路之间的联系以网络的形式展示。图
+中圆点展示的为富集通路或基因，均带有各自的标识。点
+的大小代表富集到此Pathway下的差异基因数目，点越大表示此Pathway差异基因越多。根
+据用户提供的AOI/ROI信息，分组结果按标签页排列显示。
+<br><dsrcp>`r if("富集分析网络图" %in% names(dscrp_list)){dscrp_list["富集分析网络图"]}`</dsrcp>
+
+
+```{r ORA_enrich_network, results = 'asis', fig.width = 12,fig.height = 14}
+template <- "###### %s {.unlisted .unnumbered}
+"
+for (g in names(exp_group_object@deg)){
+	cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string)))
+	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation)))
+	# cat(exp_group_object@deg[[g]]@natural_annotation)
+	subchunkify(p2_list[[g]], fig_height = 14, fig_width = 12)
+	ggsave(paste0(PlotsPath, "enrichment_gene_concept_network_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),".pdf"), 
+											plot = p2_list[[g]], height = 14, width = 12)
+	cat(space)
+}
+
+```
+
+#####  {.unlisted .unnumbered}
+
+<br>
+
+
+<!-- ## GSEA差异富集分析 {.tabset .tabset-fade} -->
+
+<!-- 通路富集的必要性在于，若只依据差异表达基因队列进行探索，无法分辨出具有生物学意义的差异与实验技术误差的边界；无法将表达差异与具有生物学意义的结论链接，全面地解释生物学现象。同时，具有生物学意义的通路上的基因往往不一定会成为最具显著差异的那几个基因。基因通路相关基因的整体富集造成具有生物学意义的影响比单个基因的表达更值得研究。 -->
+<!-- <br>通过对不同差异分析分组的差异基因的富集分析，可以从基因集合的水平上推测差异表达与哪些具有生物学功能的通路相关。此处对差异分析上下调的基因分别进行利用GO数据库、KEGG数据库的，使用GSEA方法的富集分析。 -->
+<!-- <details> -->
+<!-- <summary> GO，KEGG 和 GSEA 的介绍</summary> -->
+<!-- <div class=details_text> -->
+<!-- **GO**全称为 Gene Ontology[@ashburner2000gene]，其根源是生物信息学的方法论。该方法通过既往研究，对跨物种的基因和基因相关产物的信息和功能的汇总，标准化了各基因的注释描述从而便于生命科学研究的开展。GO主要包含三个大类，分别从Cellular Component，Moleculer Function， Biological Process三方面对基因进行详细的分类注释。在功能富集分析中，GO其实狭义上指的是利用Gene Ontology Consortium，即GO方法论总结储存的数据库，对现有表达谱进行功能富集分析。 -->
+<!-- <br>**KEGG**全称为 Kyoto Encyclopedia of Genes and Genomes[@kanehisa2000kegg]，与GO类似，是由日本京都大学于人类基因组计划时领衔提出的项目，同样是对基因组，酶促途径和生物化学物质之间的复杂关系进行了全面的梳理，构建了全面的互作网络关系。 -->
+<!-- <br>**GSEA**全称为 Gene Set Enrichment Analysis，是美国Broad Institute开发的基因富集分析方法学之一[@subramanian2005gene]。通过与预定义的基因集在基因位置、性质、互作关系、生物学功能等层面的比较后，将已知基因进行分组归类。与先前方法相比的不同之处在于： -->
+<!-- <br>GSEA之前，富集分析通过将差异表达中头尾最显著的基因队列与GO/KEGG数据库进行对比，计算哪些通路上有输入基因队列的富集，再利用统计学检验筛选出显著富集的通路。此方法只考虑差异表达基因的基因本身，并不对基因队列进行排序，队列中最具显著差异的基因和略微有差异的基因是被相同对待的，忽视了差异表达基因之间表达变化大小的权重。同时人为的阈值选择不可避免的带入了主观性影响。 -->
+<!-- <br>GSEA的核心变化是在研究差异表达基因队列时，将基因队列按照差异表达的log2FC(或其他排列方式)按序排列，具有最大差异的基因会在队列最前方，在功能富集分析时将基因的差异表达程度的影响纳入分析考虑的参数。在实际分析中，先验知识的基因注释参照信息也会进行排序。待测数据集将会被观测是在排序的参照数据集里随机分布，还是会富集在参照数据集的头部或尾部。若待测数据集存在某种偏向性的富集则说明在此对应功能通路上具有生物学意义的显著。GSEA不会具有主观性的筛选显著表达的基因，而是关注整体趋势不被显著性束缚，更符合通路富集其分析本身的意义。 -->
+<!-- </details> -->
+
+
+<!-- ```{r GSEA_enrich-calculation, results = 'asis', fig.width = 12, fig.height = 13,} -->
+<!-- create_dir(paste0(CachePath,"GSEA/")) -->
+<!-- create_dir(paste0(PlotsPath,"GSEA/")) -->
+<!-- for (g in names(exp_group_object@deg)){ -->
+<!--   message("Executing enrichment analysis for DE group | ",gsub("的差异","",exp_group_object@deg[[g]]@label_string), " | ...") -->
+<!--   tmp_deg <- exp_group_object@deg[[g]]@result_df -->
+
+<!--   # for UP -->
+<!--   tmp_deg_up <- tmp_deg %>% dplyr::filter(tmp_deg$logFC >= 0) -->
+<!--   # tmp_deg_up <- tmp_deg %>% dplyr::filter(change == "UP") -->
+<!--   filtered_up <- tmp_deg_up[,"logFC"] -->
+<!--   names(filtered_up) <- suppressMessages(tranSymbol(as.character( -->
+<!--     rownames(tmp_deg_up)),org = exp_group_object@config$org))$ENTREZID -->
+<!--   filtered_up <- filtered_up[unique(names(filtered_up))] -->
+<!--   filtered_up <- sort(filtered_up, decreasing = TRUE) -->
+
+<!--   # for DOWN -->
+<!--   tmp_deg_down <- tmp_deg %>% dplyr::filter(tmp_deg$logFC <= 0) -->
+<!--   filtered_down <- tmp_deg_down[,"logFC"] -->
+<!--   names(filtered_down) <- suppressMessages(tranSymbol(as.character( -->
+<!--     rownames(tmp_deg_down)),org = exp_group_object@config$org))$ENTREZID -->
+<!--   filtered_down <- filtered_down[unique(names(filtered_down))] -->
+<!--   filtered_down <- sort(filtered_down, decreasing = TRUE) -->
+<!--   # ClusterProfiler formatted list, named with gene IDs, -->
+<!--   # ranked by log2FC, does not contain duplicate gene ID. -->
+<!--   # log2FC-numeric, ENTREZID-named, decreasing-sorted vector -->
+<!--   #for all-degene -->
+
+<!--   # tmp_deg_all <- tmp_deg %>% dplyr::filter(tmp_deg$logFC >= 0|tmp_deg$logFC <= 0) -->
+<!--   # filtered_all <- tmp_deg_all[,"logFC"] -->
+<!--   # names(filtered_all) <- suppressMessages(tranSymbol(as.character( -->
+<!--   #   rownames(tmp_deg_all)),org = exp_group_object@config$org))$ENTREZID -->
+<!--   # filtered_all <- filtered_all[unique(names(filtered_all))] -->
+<!--   # filtered_all <- sort(filtered_all, decreasing = TRUE) -->
+
+<!--   message("Executing GO enrichment for DE group | ", gsub("的差异","",exp_group_object@deg[[g]]@label_string), " | ...") -->
+<!--   GO_UP <- do_GO_gsea(filtered_up,  -->
+<!--                       pvalueCutoff = 1,  -->
+<!--                       org = exp_group_object@config$org, -->
+<!--                       scoreType = "pos", -->
+<!--                       file_name = paste0(CachePath,"GSEA/", gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_GO_GSEA_Enrich_UPGene.csv")) -->
+<!--   GO_DOWN <- do_GO_gsea(filtered_down,  -->
+<!--                         pvalueCutoff = 1, -->
+<!--                         org = exp_group_object@config$org,  -->
+<!--                         scoreType = "neg", -->
+<!--                         file_name = paste0(CachePath,"GSEA/", gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_GO_GSEA_Enrich_DOWNGene.csv")) -->
+<!--   message("Executing KEGG enrichment for DE group | ", gsub("的差异","",exp_group_object@deg[[g]]@label_string), " | ...") -->
+<!--   KEGG_UP <- do_KEGG_gsea(filtered_up,  -->
+<!--                           pvalueCutoff = 1,  -->
+<!--                           scoreType = "pos", -->
+<!--                           org = exp_group_object@config$org, -->
+<!--                           file_name = paste0(CachePath,"GSEA/", gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_KEGG_GSEA_Enrich_UPGene.csv"))	 -->
+<!--   KEGG_DOWN <- do_KEGG_gsea(filtered_down,  -->
+<!--                             pvalueCutoff = 1,  -->
+<!--                             scoreType = "neg", -->
+<!--                             org = exp_group_object@config$org, -->
+<!--                             file_name = paste0(CachePath,"GSEA/", gsub("的差异","",exp_group_object@deg[[g]]@label_string), "_KEGG_GSEA_Enrich_DOWNGene.csv"))	 -->
+<!--   # #for all KEGG -->
+<!--   # KEGG_ALL <- do_KEGG_gsea(filtered_all, -->
+<!--   #                           pvalueCutoff = 1, -->
+<!--   #                           scoreType = "std", -->
+<!--   #                           org = exp_group_object@config$org, -->
+<!--   #                           file_name = paste0(CachePath, g, "_KEGG_GSEA_Enrich_ALLGene.csv")) -->
+
+<!--   exp_group_object@deg[[g]]@deg_enrich$GO_UP <- GO_UP -->
+<!--   exp_group_object@deg[[g]]@deg_enrich$GO_DOWN <- GO_DOWN -->
+<!--   exp_group_object@deg[[g]]@deg_enrich$KEGG_UP <- KEGG_UP -->
+<!--   exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN <- KEGG_DOWN -->
+<!--   #exp_group_object@deg[[g]]@deg_enrich$KEGG_all <-  KEGG_ALL -->
+<!-- } -->
+<!-- ``` -->
+<!-- ```{r GSEA折线图,results = 'asis', fig.width = 18, fig.height = 7} -->
+
+<!-- suppressPackageStartupMessages(library(enrichplot)) -->
+<!-- create_dir(paste0(CachePath,"GSEA/Line_chart")) -->
+<!-- create_dir(paste0(PlotsPath,"GSEA/Line_chart")) -->
+<!-- template <- "### %s {.tabset .tabset-fade .tabset-pills .unlisted .unnumbered} -->
+<!-- " -->
+<!-- template_inside <- "#### %s {.unlisted .unnumbered} -->
+<!-- " -->
+<!-- for (g in names(exp_group_object@deg)){ -->
+<!--   #cat(space) -->
+<!--   cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string))) -->
+<!--   #cat(space) -->
+<!-- #是否展示Pvalue -->
+<!-- pvalue_table=FALSE#当该通路的描述非常长的时候,显示p值会使描述出框. -->
+<!-- #提取每组最显著的通路进行展示,虽说是最显著的前十,但是我并没有对p值进行过滤. -->
+<!-- #### for GO up DEgene #### -->
+<!-- cat(sprintf(template_inside, "GO_UP")) -->
+<!-- title <- exp_group_object@deg[[g]]@deg_enrich$GO_UP %>% .[order(.$pvalue),] %>% .[1,"ID"] -->
+<!-- p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$GO_UP,title, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title = title,base_size = 15) -->
+
+<!-- subchunkify(p, fig_height = 7, fig_width = 15) -->
+<!-- cat(space) -->
+<!-- #绘制前十通路,但不进行展示 -->
+<!-- path <- exp_group_object@deg[[g]]@deg_enrich$GO_UP %>% .[order(.$pvalue),] %>% .[1:10,"ID"] -->
+<!-- for(pathway in path){ -->
+<!--   p <- gseaplot2( -->
+<!--       exp_group_object@deg[[g]]@deg_enrich$GO_UP, -->
+<!--       pathway, -->
+<!--       color = "firebrick", -->
+<!--       rel_heights = c(1, .2, .6), -->
+<!--       pvalue_table = pvalue_table, -->
+<!--       title = pathway, -->
+<!--       base_size = 15 -->
+<!--     ) -->
+<!--   #按照通路名称进行保存 -->
+<!--   create_dir(paste0( -->
+<!--     PlotsPath, -->
+<!--     "GSEA/Line_chart/go_up/", -->
+<!--     gsub("的差异","",exp_group_object@deg[[g]]@label_string) -->
+<!--   )) -->
+<!--   ggsave( -->
+<!--     paste0( -->
+<!--       PlotsPath,"GSEA/Line_chart/go_up/",gsub("的差异","",exp_group_object@deg[[g]]@label_string),"/",gsub(x=pathway,pattern = ":",replacement = "-"),"_GO_UP_gseaplot.pdf" -->
+<!--     ), -->
+<!--     plot = p, -->
+<!--     width = 15, -->
+<!--     height = 7 -->
+<!--   ) -->
+<!-- } -->
+<!-- #### forGO down DEgene #### -->
+<!-- title <- exp_group_object@deg[[g]]@deg_enrich$GO_DOWN %>% .[order(.$pvalue),] %>% .[1,"ID"] -->
+<!-- p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$GO_DOWN,title, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title = title,base_size = 15) -->
+<!-- cat(sprintf(template_inside, "GO_DOWN")) -->
+<!-- subchunkify(p, fig_height = 7, fig_width = 15) -->
+<!-- cat(space) -->
+<!-- #绘制前十通路,但不进行展示 -->
+<!-- path <- exp_group_object@deg[[g]]@deg_enrich$GO_DOWN %>% .[order(.$pvalue),] %>% .[1:10,"ID"] -->
+<!-- for(pathway in path){ -->
+<!--   p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$GO_DOWN,pathway, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title =pathway,base_size = 15) -->
+<!--   #按照通路名称进行保存 -->
+<!--   create_dir(paste0(PlotsPath,"GSEA/Line_chart/go_down/",gsub("的差异","",exp_group_object@deg[[g]]@label_string))) -->
+<!--   ggsave(paste0(PlotsPath,"GSEA/Line_chart/go_down/",gsub("的差异","",exp_group_object@deg[[g]]@label_string),"/",gsub(x=pathway,pattern = ":",replacement = "-"),"_GO_DOWN_gseaplot.pdf"),  -->
+<!-- 											plot = p, width = 15, height = 7) -->
+<!-- } -->
+<!-- #### forKEGG up DEgene #### -->
+<!-- title <- exp_group_object@deg[[g]]@deg_enrich$KEGG_UP %>% .[order(.$pvalue),] %>% .[1,"ID"] -->
+<!-- p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$KEGG_UP,title, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title = title,base_size = 15) -->
+<!-- cat(sprintf(template_inside, "KEGG_UP")) -->
+<!-- subchunkify(p, fig_height = 7, fig_width = 15) -->
+<!-- cat(space) -->
+<!-- #绘制前十通路,但不进行展示 -->
+<!-- path <- exp_group_object@deg[[g]]@deg_enrich$KEGG_UP %>% .[order(.$pvalue),] %>% .[1:10,"ID"] -->
+<!-- for(pathway in path){ -->
+<!--   p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$KEGG_UP,pathway, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title =pathway,base_size = 15) -->
+<!--   #按照通路名称进行保存 -->
+<!--   create_dir(paste0(PlotsPath,"GSEA/Line_chart/kegg_up/",gsub("的差异","",exp_group_object@deg[[g]]@label_string))) -->
+<!--   ggsave(paste0(PlotsPath,"GSEA/Line_chart/kegg_up/",gsub("的差异","",exp_group_object@deg[[g]]@label_string),"/",gsub(x=pathway,pattern = ":",replacement = "-"),"_KEGG_UP_gseaplot.pdf"),  -->
+<!-- 											plot = p, width = 15, height = 7) -->
+<!-- } -->
+<!-- #### forKEGG down DEgene #### -->
+<!-- title <- exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN %>% .[order(.$pvalue),] %>% .[1,"ID"] -->
+<!-- p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN,title, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title = title,base_size = 15) -->
+<!-- cat(sprintf(template_inside, "KEGG_DOWN")) -->
+<!-- subchunkify(p, fig_height = 7, fig_width = 15) -->
+<!-- cat(space) -->
+<!-- #绘制前十通路,但不进行展示 -->
+<!-- path <- exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN %>% .[order(.$pvalue),] %>% .[1:10,"ID"] -->
+<!-- for(pathway in path){ -->
+<!--   p <- gseaplot2(exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN,pathway, color = "firebrick", rel_heights=c(1, .2, .6),pvalue_table = pvalue_table,title =pathway,base_size = 15) -->
+<!--   #按照通路名称进行保存 -->
+<!--   create_dir(paste0(PlotsPath,"GSEA/Line_chart/kegg_down/",gsub("的差异","",exp_group_object@deg[[g]]@label_string))) -->
+<!--   ggsave(paste0(PlotsPath,"GSEA/Line_chart/kegg_down/",gsub("的差异","",exp_group_object@deg[[g]]@label_string),"/",gsub(x=pathway,pattern = ":",replacement = "-"),"_KEGG_DOWN_gseaplot.pdf"),  -->
+<!-- 											plot = p, width = 15, height = 7) -->
+
+<!-- } -->
+<!-- } -->
+
+<!-- ``` -->
+
+<!-- ## {.unlisted .unnumbered} -->
+<!-- <br> -->
+
+
+<!-- ### GSEA富集分析气泡图 {.tabset .tabset-fade} -->
+
+<!-- 差异基因富集分析的结果使用散点图(又称气泡图)展示如下，横轴代表富集系数，即富集到这个Pathway上的基因与富集分析基因总数目的百分比，越偏向右侧的分布说明富集程度越大。纵轴代表分组中差异表达基因富集到的Pathway名称，点的大小代表富集到此Pathway下的差异基因数目，点越大表示此Pathway差异基因越多。其渐变颜色表示富集信号通路的p值，越红表示p值越小，即富集越明显。根据用户提供的差异分析分组信息，又按上下调基因和GO与KEGG数据库组合排列分为四个子标签，每个标签页下展示最显著的前20个Pathway。 -->
+<!-- <br><dsrcp>`r if("富集分析气泡图" %in% names(dscrp_list)){dscrp_list["富集分析气泡图"]} `</dsrcp> -->
+
+<!-- ```{r GSEA_enrich-bubble, results = 'asis', fig.width = 8, fig.height = 7} -->
+<!-- create_dir(paste0(CachePath,"GSEA/enrich_bubble")) -->
+<!-- create_dir(paste0(PlotsPath,"GSEA/enrich_bubble")) -->
+<!-- template <- "#### %s {.tabset .tabset-fade .tabset-pills .unlisted .unnumbered} -->
+<!-- " -->
+<!-- template_inside <- "##### %s {.unlisted .unnumbered} -->
+<!-- " -->
+<!-- for (g in names(exp_group_object@deg)){ -->
+
+<!-- 	cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string))) -->
+<!-- 	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation))) -->
+
+<!-- 	cat(sprintf(template_inside, "KEGG_UP")) -->
+<!-- 	p <- do_gsea_bubbleplot(exp_group_object@deg[[g]]@deg_enrich$KEGG_UP) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 8) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_bubble/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"_KEGG_UP_Enrich_bubbleplot.pdf"),  -->
+<!-- 											plot = p, width = 8, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "GO_UP")) -->
+<!-- 	p <- do_gsea_bubbleplot(exp_group_object@deg[[g]]@deg_enrich$GO_UP) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 8) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_bubble/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"_GO_UP_Enrich_bubbleplot.pdf"),  -->
+<!-- 											plot = p, width = 8, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "KEGG_DOWN")) -->
+<!-- 	p <- do_gsea_bubbleplot(exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 8) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_bubble/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"_KEGG_DOWN_Enrich_bubbleplot.pdf"),  -->
+<!-- 											plot = p, width = 8, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "GO_DOWN")) -->
+<!-- 	p <- do_gsea_bubbleplot(exp_group_object@deg[[g]]@deg_enrich$GO_DOWN) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 8) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_bubble/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"_GO_DOWN_Enrich_bubbleplot.pdf"),  -->
+<!-- 											plot = p, width = 8, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(space) -->
+<!-- } -->
+
+<!-- ``` -->
+<!-- ### {.unlisted .unnumbered} -->
+<!-- <br> -->
+
+<!-- ### GSEA富集分析网络图 {.tabset .tabset-fade} -->
+
+<!-- 差异基因富集分析的结果使用网络图展示如下。富集分析中的网络图可以将关键基因和富集到的通路之间的联系以网络的形式展示。图中圆点展示的为富集通路或基因，均带有各自的标识。点的大小代表富集到此Pathway下的差异基因数目，点越大表示此Pathway差异基因越多。根据用户提供的差异分析分组信息，又按上下调基因和GO与KEGG数据库组合排列分为四个子标签，每个标签页下显示对应差异基因的富集网络图。 -->
+<!-- <br><dsrcp>`r if("富集分析网络图" %in% names(dscrp_list)){dscrp_list["富集分析网络图"]} `</dsrcp> -->
+
+<!-- ```{r GSEA_enrich-network, results = 'asis', fig.width = 7, fig.height = 7} -->
+<!-- create_dir(paste0(CachePath,"GSEA/enrich_network")) -->
+<!-- create_dir(paste0(PlotsPath,"GSEA/enrich_network")) -->
+
+<!-- template <- "#### %s {.tabset .tabset-fade .tabset-pills .unlisted .unnumbered} -->
+<!-- " -->
+<!-- template_inside <- "##### %s {.unlisted .unnumbered} -->
+<!-- " -->
+<!-- for (g in names(exp_group_object@deg)){ -->
+
+<!-- 	cat(sprintf(template, paste0(exp_group_object@deg[[g]]@label_string))) -->
+<!-- 	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>", paste0(exp_group_object@deg[[g]]@natural_annotation))) -->
+
+<!-- 	cat(sprintf(template_inside, "KEGG_UP")) -->
+<!-- 	p <- do_gsea_network(exp_group_object@deg[[g]]@deg_enrich$KEGG_UP, showCategory = 5) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 7) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_network/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"KEGG_UP_Enrich_concept_network.pdf"),  -->
+<!-- 											plot = p, width = 7, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "GO_UP")) -->
+<!-- 	p <- do_gsea_network(exp_group_object@deg[[g]]@deg_enrich$GO_UP, showCategory = 3) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 7) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_network/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"GO_UP_Enrich_concept_network.pdf"),  -->
+<!-- 											plot = p, width = 7, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "KEGG_DOWN")) -->
+<!-- 	p <- do_gsea_network(exp_group_object@deg[[g]]@deg_enrich$KEGG_DOWN, showCategory = 5) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 7) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_network/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"KEGG_DOWN_Enrich_concept_network.pdf"),  -->
+<!-- 											plot = p, width = 7, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(sprintf(template_inside, "GO_DOWN")) -->
+<!-- 	p <- do_gsea_network(exp_group_object@deg[[g]]@deg_enrich$GO_DOWN, showCategory = 3) -->
+<!-- 	subchunkify(p, fig_height = 7, fig_width = 7) -->
+<!-- 	ggsave(paste0(PlotsPath,"GSEA/enrich_network/", gsub("的差异","",exp_group_object@deg[[g]]@label_string),"GO_DOWN_Enrich_concept_network.pdf"),  -->
+<!-- 											plot = p, width = 7, height = 7) -->
+<!-- 	cat(space) -->
+<!-- 	cat(space) -->
+<!-- } -->
+
+<!-- ``` -->
+<!-- ### {.unlisted .unnumbered} -->
+<!-- <br> -->
+
+## Signature 分析
+
+基因Signature是指科研或临床实验中发现的能代表细胞独特特征的单基因或多基因集合的表达模式，通常与细胞生理过程或细胞病变相关。研究中常使用基因Signatures来进行疾病分型、疗效预测或预后预测。WTA检测Panel中涉及的基因表达数据利用MSigDB(Molecular Signatures Database)数据库中定义的已知基因合集[Hallmark](https://www.gsea-msigdb.org/gsea/msigdb),共包括50个特征基因集。
+
+```{r sig-DE-dir, results = 'hide',cache=F}
+CachePath <- sub('[/][^/]+$', '/6.Signature/', gsub('[/]$', '', CachePath))
+PlotsPath <- sub('[/][^/]+$', '/6.Signature/', gsub('[/]$', '', PlotsPath))
+create_dir(path.list = c(CachePath,PlotsPath))
+```
+
+Signature分析相关的数据图表将被保存至 **`r CachePath`**。
+```{r signature_analysis_background, results = 'hide', fig.width = 8}
+PathwaySignature=function(object,model="CTA",order_path=paste0(resource_path,"/extdata/annotate/")){
+	if(model=="CTA"){
+  signature_file = paste0(system.file("extdata", package = "EPARS"), "/","Signature_List.xlsx")
+  signature_db = read.xlsx(signature_file, sheet = "DSP_CTA_Signature")
+	}
+	if(model=="WTA"){
+		if(object@config$org == "hsa"){signature_file <-paste0(order_path ,"Hallmark_category_human.csv")}
+		if(object@config$org == "mm"){signature_file <- paste0(order_path, "Hallmark_category_mouse.csv")}
+		signature_db = read.csv(file = signature_file,sep = ",",header = T)
+	}
+  tmp_exp = object@exp
+  for (c in unique(signature_db$Class)){
+    if(c == "Internal Reference"){
+      next
+    }
+    tmp_pathway = unique(signature_db[signature_db$Class == c,c("Gene","Pathway")])
+    tmp_signature = data.frame(row.names = colnames(tmp_exp))
+
+    # for (p in tmp_pathway){
+
+      # tmp_gene = signature_db[signature_db$Pathway == p,"Gene"]
+      # # drop = FALSE to keep matrix object type in case of only 1 gene detected
+      # tmp_df = tmp_exp[which(rownames(tmp_exp) %in% tmp_gene),, drop = FALSE]
+      # if (nrow(tmp_df) > 1){
+      # 	tmp_signature[[p]] = apply(tmp_df, 2, EPARS::geo_mean)
+      # } else {
+      # 	next
+      # }
+      # }
+    #signature_t = t(tmp_signature)
+    #object@signature_list[[c]] = signature_t
+
+    tmp_signature <- ssgsea(tmp_exp, tmp_pathway)
+    tmp_signature <- tmp_signature[,-c(1,2)]
+
+    object@signature_list[[c]] = tmp_signature
+  }
+  return(object)
+}
+
+#Pathway signature
+exp_group_object <- PathwaySignature(exp_group_object,model = "WTA")
+
+```
+### Pathway Signature 热图聚类 {.tabset .tabset-fade}
+
+对数据集覆盖到的不同的通路类型进行聚类分析，观察AOI/ROI中通路的表达相似性情况。根据用户提供的不同分组信息对聚类结果一一用热图展示[@gu2016complex]。其中数据均进行了归一化处理，让均值为0和标准差为1。将归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。默认使用最小方差法ward.D2聚类方法构建距离矩阵，距离值越小则AOI/ROI之间的相似度越大。本项目通路聚类分析结果如下，横轴代表每个AOI/ROI，纵轴代表用户所选通路类型中的每个通路，示例注释列在热图的顶部，图例显示了AOI/ROI分组信息，其通路几何平均表达值用渐变颜色表示，Signature按行显示并列在热图的右侧。下方按标签页呈现了不同的通路下的Signature热图聚类结果。
+<br><dsrcp>`r if("Pathway Signature 热图聚类" %in% names(dscrp_list)){dscrp_list["Pathway Signature 热图聚类"]} `</dsrcp>
+  
+  
+  
+```{r signature_heatmap, results = 'asis', fig.width = 8}
+create_dir(paste0(CachePath,"heatmap/"))
+create_dir(paste0(PlotsPath,"heatmap/"))
+# Plot signature heatmap
+template <- "#### %s {.unlisted .unnumbered}
+"
+signature = exp_group_object@signature_list
+anno = exp_group_object@plot_setting$heatmap_anno
+for (sig in names(signature)[!(names(signature) %in% c("immune cell quantity","immune cell proportion"))]){
+  title = NULL
+  mtx <- htmp_scale(as.matrix(signature[[sig]]))
+  p <- plotImmuHeatmap(mtx,anno,title, scale = FALSE, 
+                       htmp_color = exp_group_object@config$heatmap_color,show_column_names = F)
+  
+  
+  cat(sprintf(template, paste0(sig)))
+  subchunkify(p, fig_width = 10)
+  cat(space)
+  suppressMessages(save_pdf(p, paste0(PlotsPath, "heatmap/signature_heatmap_", sig, ".pdf"), width = 10))
+}
+```
+### {.unlisted .unnumbered}
+<br>
+  
+
+### 免疫细胞 Signature 分析
+
+ImmuCellAI（[Immune Cell Abundance Identifier](http://bioinfo.life.hust.edu.cn/ImmuCellAI/)）
+是一个从基因表达数据集（包括RNA-Seq和芯片数据）中估计24种免疫细胞丰度的工具，其中24种免疫细胞由18种T细胞亚型和6种其他免疫细胞组成。B细胞、NK细胞、单核细胞、巨噬细胞、中性粒细胞和DC细胞。(小鼠为36种。)对结果利用热图进行展示，其中数据均进行了归一化处理，让均值为0和标准差为1。将归一化的值在平均值±2倍标准偏差处进行截尾处理，以确保最大比例的数据的颜色分布正常（99% 的数据在平均值的 ± 2倍标准偏差内）。默认使用最小方差法ward.D2聚类方法构建距离矩阵，距离值越小则AOI/ROI之间的相似度越大。
+<!-- # ```{r Cibersortx_background, results = 'asis', echo = FALSE, warning = FALSE, message = FALSE, fig.width = 6,fig.height = 6} -->
+<!-- #  -->
+<!-- 为明确AOI/ROI中各个免疫细胞的占比是否有明显的不同，使用Cibersort预测每个AOI/ROI中多类型混杂细胞中各种类独立的丰度。该方法根据细胞谱矩阵，指定了实验中每种细胞类型的预期表达谱，利用反卷积的方法估计肿瘤微环境中的免疫细胞和基质细胞计数。本项目中每个AOI/ROI中不同类别免疫细胞基因的比例，用直方图展示，横轴代表每个AOI/ROI。 -->
+<!-- # suppressPackageStartupMessages(library(e1071)) -->
+<!-- # suppressPackageStartupMessages(library(parallel)) -->
+<!-- # suppressPackageStartupMessages(library(preprocessCore)) -->
+<!-- # suppressPackageStartupMessages(library(matrixStats)) -->
+<!-- # suppressPackageStartupMessages(library(RColorBrewer)) -->
+<!-- # suppressPackageStartupMessages(library(tidyverse)) -->
+<!-- # suppressPackageStartupMessages(library(cowplot)) -->
+<!-- # suppressPackageStartupMessages(library(ggpubr)) -->
+<!-- # suppressPackageStartupMessages(library(bslib)) -->
+<!-- # suppressPackageStartupMessages(library(ggthemes)) -->
+<!-- # suppressPackageStartupMessages(library(dplyr)) -->
+<!-- # suppressPackageStartupMessages(library(reshape2)) -->
+<!-- # suppressPackageStartupMessages(library(RColorBrewer)) -->
+<!-- # suppressPackageStartupMessages(library(pacman)) -->
+<!-- # suppressPackageStartupMessages(library(ggpubr)) -->
+<!-- # #选择种属为人的参考基因集 -->
+<!-- # if (exp_group_object@config$org=="hsa") {sig_matrix <-readRDS(file = "/home/rstudio/code/EPARS_RMD/extdata/Reference_Data/Cibersort/LM22.rds") } -->
+<!-- # #选择种属为小鼠的参考基因集 -->
+<!-- # if (exp_group_object@config$org=="mm") {sig_matrix <-readRDS(file = "/home/rstudio/code/EPARS_RMD/extdata/Reference_Data/Cibersort/immuCellAI_mouse_maker.rds")} -->
+<!-- #  -->
+<!-- # source("/home/rstudio/code/EPARS_RMD/extdata/Reference_Data/Cibersort/CIBERSORT.R") -->
+<!-- #   Cibersort.result <- CIBERSORT(sig_matrix = sig_matrix, -->
+<!-- #                       mixture_file = exp_group_object@exp, -->
+<!-- #                       perm = 100,#一般设置到1000,当数据量大的时候可适当调低该值,理论上越高越准 -->
+<!-- #                       QN = FALSE )# 芯片数据设置T,测序数据设置F,但是epars上不能多线程,所以即便设置成T也会报错. -->
+<!-- # # write.csv(Cibersort.result,paste0(PlotsPath,"Cibersort_result.csv" )) -->
+<!-- #   #Cibersort.result <- read.csv(file = "../CIBERSORT-Results.txt",sep = "\t",row.names = 1) -->
+<!-- # ``` -->
+<!-- # ```{r Cibersortx_Visualization,results = 'asis', echo = FALSE, warning = FALSE, message = FALSE, fig.width = 12,fig.height = 12} -->
+<!-- # #对Cibersort结果进行可视化 -->
+<!-- # #对人源数据进行处理 -->
+<!-- # if (exp_group_object@config$org=="hsa") { -->
+<!-- #   homo <- Cibersort.result %>% -->
+<!-- #   as.data.frame() %>% -->
+<!-- #   rownames_to_column("Sample") %>% -->
+<!-- #   pivot_longer(cols = 2:23,#人源一共22个免疫细胞 -->
+<!-- #                names_to = "CellType", -->
+<!-- #                values_to = "Composition") -->
+<!-- # plot.info <- homo[,c(5,1,6)]  -->
+<!-- # } -->
+<!-- # #对鼠源数据进行处理 -->
+<!-- # if (exp_group_object@config$org=="mm"){ -->
+<!-- #   Mus <- Cibersort.result %>% -->
+<!-- #   as.data.frame() %>% -->
+<!-- #   rownames_to_column("Sample") %>% -->
+<!-- #   pivot_longer(cols = 2:37,#鼠源一共36个免疫细胞 -->
+<!-- #                names_to = "CellType", -->
+<!-- #                values_to = "Composition") -->
+<!-- # plot.info <- Mus[,c(5,1,6)] -->
+<!-- # } -->
+<!-- #  -->
+<!-- # qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',] -->
+<!-- # col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals))) -->
+<!-- # #barplot -->
+<!-- # p <- ggbarplot( -->
+<!-- #   plot.info, -->
+<!-- #   x = "Sample", -->
+<!-- #   y = "Composition", -->
+<!-- #   size = 0, -->
+<!-- #   fill = "CellType", -->
+<!-- #   #color = "CellType", -->
+<!-- # ) + -->
+<!-- #   scale_fill_manual(values = col_vector)+ -->
+<!-- #   #theme_base() + -->
+<!-- #   theme(axis.text.x = element_text( -->
+<!-- #       angle = 90, -->
+<!-- #       hjust = 1, -->
+<!-- #       vjust = 1, -->
+<!-- #       size = 10), -->
+<!-- #     legend.position = "right", -->
+<!-- #     panel.border = element_blank())#去除边框) -->
+<!-- #  -->
+<!-- # subchunkify(p, fig_width = 12) -->
+<!-- # cat(space) -->
+<!-- # invisible(ggsave(paste0(PlotsPath,"Cibersort_barplot.pdf"),p,width = 12)) -->
+<!-- #  -->
+<!-- # ``` -->
+```{r ImmCellAI, results = 'hide', echo = FALSE, warning = FALSE, message = FALSE, fig.width = 12,}
+#### immCEllAI install.packages('devtools')
+#### install_github('lydiaMyr/ImmuCellAI-mouse@main')
+#### install_github('lydiaMyr/ImmuCellAI@main')
+#### fix bug of immCellALmouse 
+create_dir(paste0(CachePath,"ImmCellAI/"))
+create_dir(paste0(PlotsPath,"ImmCellAI/"))
+
+immcellexp <- exp_group_object@exp
+if (exp_group_object@config$org == "mm") {
+  suppressMessages(library(ImmuCellAImouse))
+  #### fix bug of immCellALmouse 
+
+    #### data_type = 'rnaseq' or 'microarray' group_tag: One
+    #### of 0 and 1, if there is the need to perform the
+    #### comparision between different groups.  If the value
+    #### is 1, users need to add a group tag row in the
+    #### input epxression matrix to explain the group of
+    #### each sample.  customer: One of 0 and 1, if there is
+    #### the need to upload the self-build reference file.
+    #### if the value = 1, users need to provide the gene
+    #### signature (by list format in R) and reference
+    #### expression matrix with rownames is gene, colnames
+    #### is cell type and separated by tab.
+#### immcellAI mouse ####
+    suppressMessages(immcellexp_mouse <- ImmuCellAI_mouse(immcellexp, data_type = "rnaseq",
+                                         group_tag = 0, customer = FALSE))
+    result <- immcellexp_mouse[[1]]
+    
+    
+    write.table(result, file = paste0(PlotsPath,"ImmCellAI/ImmCellAI_mouse_result.csv" ),  sep = ",", row.names = T, col.names = T)
+    
+    
+    # write.csv(x = result, file = paste0(PlotsPath,"ImmCellAI_mouse_result.csv" ), fileEncoding = "UTF-8")
+    p <- plotImmuHeatmap(t(result[, 1:36]), anno = exp_group_object@plot_setting$heatmap_anno,
+                         title = NULL, scale = T, show_column_names = FALSE, htmp_color = exp_group_object@config$heatmap_color)
+    
+    #subchunkify(p, fig_width = 12)
+    
+    cat(space)
+    suppressMessages(save_pdf(p, paste0(PlotsPath,"ImmCellAI/ImmCellAI_mouse.pdf"), width = 10))
+    rm(immcellexp_mouse)
+}
+#### immcellAI human ####
+if (exp_group_object@config$org == "hsa") {
+    # response_tag: One of 0 and 1, if there is the need to
+    # predict the ICB response of each sample.
+    suppressMessages(library(ImmuCellAI))
+    suppressMessages(immcellexp_human <- ImmuCellAI(immcellexp, data_type = "rnaseq",customer=0,
+                                       group_tag = 0, response_tag = 0))
+    result <- immcellexp_human[[1]]
+    
+    write.table(result, file = paste0(PlotsPath,"ImmCellAI/ImmCellAI_hsa_result.csv"),  sep = ",", row.names = T, col.names = T)
+    #write.csv(x = result, file = paste0(PlotsPath,"ImmCellAI_hsa_result.csv" ), fileEncoding = "UTF-8")
+    p <- plotImmuHeatmap(t(result[, 1:24]), anno = exp_group_object@plot_setting$heatmap_anno,
+                         title = NULL, scale = T, show_column_names = FALSE, htmp_color = exp_group_object@config$heatmap_color)
+    #subchunkify(p, fig_width = 12)
+    
+    cat(space)
+    suppressMessages(save_pdf(p, paste0(PlotsPath,"ImmCellAI/ImmCellAI_hsa.pdf"), width = 10))
+    rm(immcellexp_human)
+}
+rm(immcellexp)
+```
+
+```{r ImmCellAI_show_results,  fig.width = 12,fig.height = 12,cache.lazy=TRUE}
+print(p)
+```
+<!-- ### {.unlisted .unnumbered} -->
+
+<br> 
+
+### Signature差异统计{.tabset .tabset-fade}
+
+```{r sig-DE-glm, results ='asis'}
+if(glm_diff){
+    cat("统计学检验可用于在选定组别中进行假设检验。对两组独立AOI/ROI的比较通常使用广义线性回归。根据用户提供的分组信息和所选Panel分析得到的通路或免疫细胞相关的Signatures，对不同组别不同的Signature分值选用合适的统计学检验方法进行差异分析，并用箱线图展示对应的Signature差异显著性结果。如下图所示，不同类型的Signatures差异统计结果按标签页排列显示：")
+}else{
+  cat("统计学检验可用于在选定组别中进行假设检验。对两组独立AOI/ROI的比较通常使用Wilcoxon秩和检验（Wilcoxon rank sum test），对多组独立AOI/ROI比较的秩和检验可用Kruskal-Wallis法。根据用户提供的分组信息和所选Panel分析得到的通路或免疫细胞相关的Signatures，对不同组别不同的Signature分值选用合适的统计学检验方法进行差异分析，并用箱线图展示对应的Signature差异显著性结果。如下图所示，不同类型的Signatures差异统计结果按标签页排列显示：")
+}
+```
+<br><dsrcp>`r if("Signature差异统计" %in% names(dscrp_list)){dscrp_list["Signature差异统计"]} `</dsrcp>
+
+<!-- #### Signature差异箱线图{.tabset .tabset-fade} -->
+
+```{r signature-diff-boxplot, results = 'asis', fig.width= 7, fig.height = 8}
+create_dir(paste0(CachePath,"diff_signature/"))
+create_dir(paste0(PlotsPath,"diff_signature/"))
+template <- "##### %s {.tabset .tabset-fade .tabset-pills .unlisted .unnumbered}
+"
+template_inside <- "##### %s {.unlisted .unnumbered}
+"
+# template <- "###### %s {.unlisted .unnumbered}
+# "
+title_template <- "#### 差异分组: %s {.tabset .tabset-fade .unlisted .unnumbered}
+"
+if(glm_diff){
+
+#print(paste0("CachePath: ",CachePath))
+#print(paste0("PlotsPath: ",PlotsPath))
+library(dplyr)
+DSP_sig_diff_boxplot=function(df,x,y,Patient, color_palette = desat(c("royalblue3", "indianred3",brewer.pal(name="Dark2", n = 8)), 0.8)){
+  library(ggplot2)
+  title = wrap.labels(paste(y,"signature score"), 30)
+  
+  p <- suppressMessages(ggboxplot(df, x = x, y = y,color = "black", palette = "lancet",fill = x) + scale_fill_manual(values = color_palette))
+  p <- p #+ stat_compare_means(method = "wilcox.test", label = "p.format")+ 
+  labs(x="", y=title)
+  p <- p + font("ylab", size = 15)
+  p <- p + theme(legend.position = "none",title = element_text(size = 8),
+                 strip.text = element_text(face = "bold"),
+                 strip.background = element_rect(fill="white"))
+  #formula=as.formula(paste0("rank(`",y,"`) ~ factor(`",x,"`)+ factor(`",Patient,"`)" ) )
+  formula=as.formula(paste0("`",y,"` ~ factor(`",x,"`)+ (1|`",Patient,"`)" ) )
+  formula_rank=as.formula(paste0("rank(`",y,"`) ~ factor(`",x,"`)+ (1|`",Patient,"`)" ) )
+
+  b=tryCatch(		   afex::lmer_alt(formula,data = tmp_df_filtered
+        #inverse.gaussian(link = "1/mu^2")
+        
+        #family =quasi(link = "identity", variance = "constant")
+        #,quasipoisson(link = "log")#,poisson(link = "log")
+        #,family  = binomial(link = "logit")
+  ),   error = function(e) tryCatch(		   afex::lmer_alt(formula_rank,data = tmp_df_filtered
+        #inverse.gaussian(link = "1/mu^2")
+        
+        #family =quasi(link = "identity", variance = "constant")
+        #,quasipoisson(link = "log")#,poisson(link = "log")
+        #,family  = binomial(link = "logit")
+  ),   error = function(e)1.1))
+  max_d=max(df[,y])
+  if(!is.numeric(b)) {p=p+annotate("text",x =1.5 ,y = max_d*1.01, label =paste0("p=",round(b%>%base::summary()%>%{.[["coefficients"]][2,5]},4)))
+  b=b%>%base::summary()%>%{.[["coefficients"]][2,]}
+  }
+  return( list(plot=p,LMM=b) )
+}
+
+tmp_list_all = list()
+
+for (g in names(exp_group_object@deg)){
+	message("Plotting Signature diff boxplot for DE group -",gsub("的差异","",exp_group_object@deg[[g]]@label_string), "- ...")
+  title_template <- "#### 差异分组: %s {.tabset .tabset-fade .unlisted .unnumbered}
+"
+	cat(sprintf(title_template, paste0(exp_group_object@deg[[g]]@label_string)))
+
+	
+	if (length(exp_group_object@deg[[g]]@groupinfo) >= 2){
+	tmp_groupinfo_1 <- exp_group_object@deg[[g]]@groupinfo[[2]]
+	tmp_groupinfo_2 <- exp_group_object@deg[[g]]@groupinfo[[3]]
+} else{
+	tmp_groupinfo_1 <- unique(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]])[1]
+	tmp_groupinfo_2 <- unique(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]])[2]
+}
+	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>",
+				paste0(sprintf("此差异分析研究的是各类通路中 %s 和 %s 两个分组间的Signature差异表达。使用广义线性混合模型来检查分组间的每个Signature上是否有显著性差异。p-value < 0.05 作为检验显著性的数值标准。", paste0(tmp_groupinfo_1),  paste0(tmp_groupinfo_2)))))
+	
+	# cat(exp_group_object@deg[[g]]@natural_annotation)
+	cat(space)
+	for (c in names(exp_group_object@signature_list)){
+		tmp_list = list()
+
+		tmp_df <- NULL
+		tmp_df = cbind(t(exp_group_object@signature_list[[c]]),data.frame(exp_group_object@anno))
+		tmp_df_filtered <- subset(tmp_df, rownames(tmp_df)
+				   %in% exp_group_object@deg[[g]]@filtered_sample)
+		tmp_sig = rownames(exp_group_object@signature_list[[c]])
+		for (i in tmp_sig){
+	LMM<-DSP_sig_diff_boxplot(df=tmp_df_filtered,x=exp_group_object@deg[[g]]@groupinfo[[1]],y=i,"SlideName")%>%{.[["LMM"]]}
+#	cat(LMM)
+	  if(LMM%>%length()%>%{.-1}){ tmp_list_all=rbind(tmp_list_all,c(paste0(exp_group_object@deg[[g]]@label_string),c,i,LMM))
+	  }
+
+	tmp_list[[i]]=tryCatch(		    DSP_sig_diff_boxplot(df=tmp_df_filtered,x=exp_group_object@deg[[g]]@groupinfo[[1]],y=i,"SlideName")[["plot"]],   error = function(e)text_only_ggplot("Error: cannot find valid starting values: please specify some")
+)
+
+		    #sig_diff_boxplot(tmp_df_filtered,exp_group_object@deg[[g]]@groupinfo[[1]],i)
+		}
+		ncol = 6
+		nrow = ceiling(length(tmp_sig)/ncol)
+		cat(sprintf(template, paste0(c)))
+		getwd_dir
+		suppressMessages(png(paste0(getwd_dir,PlotsPath%>%str_remove("^."), "signature_diff_boxplot_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),
+
+				   "_", gsub(" ", "_", c),".png"), width = ncol*200, 
+													height = nrow*380))
+		suppressMessages(print(ggarrange(plotlist = tmp_list,nrow = nrow, ncol = ncol) +
+				coord_fixed(ratio = 1.8* nrow/ncol)))
+		dev.off()
+		cat("<img src=",paste0(getwd_dir,PlotsPath%>%str_remove("^."), "signature_diff_boxplot_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),
+
+				   "_", gsub(" ", "_", c),".png")," width='100%' align = center />")
+		cat(space)
+	}
+	cat(paste0("#### {.unlisted .unnumbered}"))
+	cat(space)
+}
+}else{
+for (g in names(exp_group_object@deg)){
+	message("Plotting Signature diff boxplot for DE group -",g, "- ...")
+	cat(sprintf(title_template, paste0(exp_group_object@deg[[g]]@label_string)))
+	
+	if (length(exp_group_object@deg[[g]]@groupinfo) >= 2){
+	tmp_groupinfo_1 <- exp_group_object@deg[[g]]@groupinfo[[2]]
+	tmp_groupinfo_2 <- exp_group_object@deg[[g]]@groupinfo[[3]]
+} else{
+	tmp_groupinfo_1 <- unique(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]])[1]
+	tmp_groupinfo_2 <- unique(exp_group_object@anno[[exp_group_object@deg[[g]]@groupinfo[[1]]]])[2]
+}
+	cat(sprintf("<details><summary>此差异分析比较的信息：</summary><div class=details_text> %s </details>",
+				paste0(sprintf("此差异分析研究的是各类通路中 %s 和 %s 两个分组间的Signature差异表达。使用wilcox秩和检验来检查分组间的每个Signature上是否有显著性差异。p-value < 0.05 作为检验显著性的数值标准。", paste0(tmp_groupinfo_1),  paste0(tmp_groupinfo_2)))))
+	
+	# cat(exp_group_object@deg[[g]]@natural_annotation)
+	cat(space)
+	for (c in names(exp_group_object@signature_list)){
+		tmp_list = list()
+		tmp_df <- NULL
+		tmp_df = cbind(t(exp_group_object@signature_list[[c]]),data.frame(exp_group_object@anno,check.names = F))
+		tmp_df_filtered <- subset(tmp_df, rownames(tmp_df)
+				   %in% exp_group_object@deg[[g]]@filtered_sample)
+		tmp_sig = rownames(exp_group_object@signature_list[[c]])
+		for (i in tmp_sig){
+		  tmp_list[[i]] <- sig_diff_boxplot(tmp_df_filtered,exp_group_object@deg[[g]]@groupinfo[[1]],i)
+		}
+		ncol = 6
+		nrow = ceiling(length(tmp_sig)/ncol)
+		cat(sprintf(template, paste0(c)))
+		#if(g=="PanCK+"){g <- "PanCK_pos"}
+				# suppressMessages(print(ggarrange(plotlist = tmp_list,nrow = nrow, ncol = ncol) +
+				# coord_fixed(ratio = 1.8* nrow/ncol)))
+		suppressMessages(png(
+		  paste0(PlotsPath,"diff_signature/signature_diff_boxplot_",gsub("的差异", "", exp_group_object@deg[[g]]@label_string),"_",gsub(" ", "_", c),".png"),
+		  width = ncol * 200,
+		  height = nrow * 380
+		))
+		suppressMessages(print(ggarrange(plotlist = tmp_list,nrow = nrow, ncol = ncol) +
+				coord_fixed(ratio = 1.8* nrow/ncol)))
+		dev.off()
+		cat("<img src=",paste0(PlotsPath, "diff_signature/signature_diff_boxplot_", gsub("的差异","",exp_group_object@deg[[g]]@label_string),
+				   "_", gsub(" ", "_", c),".png")," width='100%' align = center />")
+		cat(space)
+	}
+	#cat(paste0("#### {.unlisted .unnumbered}"))
+	cat(space)
+}
+}
+
+#tmp_list_all2=do.call(rbind,tmp_list_all)
+
+```
+
+
+###  {.unlisted .unnumbered}
+
+```{r signature-diff-table, results = 'asis', fig.width= 16, fig.height = 16}
+if(glm_diff){
+  colnames(tmp_list_all)[1:3]=c("差异分组","Signatures大类","Signatures小类")
+write.csv(tmp_list_all,paste0(CachePath, "signature_diff.csv"),row.names = F)
+tmp_list_all[,4:7]=round(as.numeric(tmp_list_all[,4:7]),4)
+print(kable(tmp_list_all,
+				format = 'html', row.names = F) %>% row_spec(0, bold = T, color = "white", background = "#4E84CC") %>% kable_material("striped") %>% scroll_box(height = "450px"))
+}
+
+#saveRDS(tmp_list_all,"tmp_list_all.RDS")
+
+```
+
+
+
+###  {.unlisted .unnumbered}

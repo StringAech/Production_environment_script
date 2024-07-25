@@ -22,16 +22,16 @@ parallel_ORA_enrichment <- function(exp_group_object, CachePath, PlotsPath, core
         }
         enr <- try(suppressMessages(enrichKEGG(gene = gene$ENTREZID, organism = org,
                                                pvalueCutoff = pvalueCutoff, qvalueCutoff = qvalueCutoff)))
-        if (org == "hsa") {
-            enr <- tryCatch(suppressMessages(setReadable(enr, OrgDb = org.Hs.eg.db,
-                                                         keyType = "ENTREZID")), error = function(e) {
-                                                         })
-        }
-        if (org == "mm") {
-            enr <- tryCatch(suppressMessages(setReadable(enr, OrgDb = org.Mm.eg.db,
-                                                         keyType = "ENTREZID")), error = function(e) {
-                                                         })
-        }
+        # if (org == "hsa") {
+        #     enr <- tryCatch(suppressMessages(setReadable(enr, OrgDb = org.Hs.eg.db,
+        #                                                  keyType = "ENTREZID")), error = function(e) {
+        #                                                  })
+        # }
+        # if (org == "mm") {
+        #     enr <- tryCatch(suppressMessages(setReadable(enr, OrgDb = org.Mm.eg.db,
+        #                                                  keyType = "ENTREZID")), error = function(e) {
+        #                                                  })
+        # }
         if (class(enr) == "try-error") {
             enr <- NULL
         }
@@ -48,7 +48,10 @@ parallel_ORA_enrichment <- function(exp_group_object, CachePath, PlotsPath, core
             if (org == "mm") {
                 enr <- setReadable(enr, OrgDb = org.Mm.eg.db, keyType = "ENTREZID")
             }
-            enr_res <- enrichres_id_transform(enr_res, gene)
+            # enr_res <- enrichres_id_transform(enr_res, gene)
+            enr_res <- tryCatch(as.data.frame(enr), error = function(e) {
+                data.frame()
+            })
             enr_plot <- enr
             enr_plot@result$Description <- wrap.labels(enr_plot@result$Description,
                                                        50)
